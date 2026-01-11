@@ -1,0 +1,37 @@
+# Build stage
+FROM golang:1.22-alpine AS builder
+
+WORKDIR /build
+
+# Install build dependencies
+RUN apk add --no-cache git gcc musl-dev
+
+# Copy go mod files
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build the API server
+RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o api ./cmd/api
+
+# Runtime stage
+FROM alpine:latest
+
+RUN apk --no-cache add ca-certificates tzdata
+
+WORKDIR /app
+
+# Copy binary from builder
+COPY --from=builder /build/api .
+
+# Copy migrations
+COPY --from=builder /build/migrations /app/migrations
+
+# Create storage directory
+RUN mkdir -p /app/storage
+
+EXPOSE 8080
+
+CMD ["/app/api"]

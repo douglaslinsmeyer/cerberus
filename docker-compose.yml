@@ -1,0 +1,160 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: cerberus-postgres
+    environment:
+      POSTGRES_DB: cerberus
+      POSTGRES_USER: cerberus
+      POSTGRES_PASSWORD: cerberus_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cerberus"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cerberus-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: cerberus-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - cerberus-network
+
+  nats:
+    image: nats:latest
+    container_name: cerberus-nats
+    command: ["-js", "-sd", "/data"]
+    ports:
+      - "4222:4222"   # Client connections
+      - "8222:8222"   # HTTP monitoring
+      - "6222:6222"   # Cluster connections
+    volumes:
+      - nats_data:/data
+    networks:
+      - cerberus-network
+
+  rustfs:
+    build:
+      context: ./rustfs
+      dockerfile: Dockerfile
+    container_name: cerberus-rustfs
+    ports:
+      - "9000:9000"   # API endpoint
+    volumes:
+      - rustfs_data:/data
+    environment:
+      RUSTFS_DATA_DIR: /data
+      RUSTFS_PORT: 9000
+    networks:
+      - cerberus-network
+
+  adminer:
+    image: adminer:latest
+    container_name: cerberus-adminer
+    ports:
+      - "8081:8080"
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+    depends_on:
+      - postgres
+    networks:
+      - cerberus-network
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: ../docker/Dockerfile.api
+    container_name: cerberus-api
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: cerberus
+      DB_USER: cerberus
+      DB_PASSWORD: cerberus_dev
+      REDIS_URL: redis:6379
+      NATS_URL: nats://nats:4222
+      STORAGE_ENDPOINT: http://rustfs:9000
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      JWT_SECRET: ${JWT_SECRET:-dev_secret_change_in_production}
+      PORT: 8080
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      nats:
+        condition: service_started
+      rustfs:
+        condition: service_started
+    # volumes:
+    #   - ./backend:/app  # Commented out - overwrites compiled binary
+    networks:
+      - cerberus-network
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: ../docker/Dockerfile.worker
+    container_name: cerberus-worker
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: cerberus
+      DB_USER: cerberus
+      DB_PASSWORD: cerberus_dev
+      REDIS_URL: redis:6379
+      NATS_URL: nats://nats:4222
+      STORAGE_ENDPOINT: http://rustfs:9000
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      nats:
+        condition: service_started
+      rustfs:
+        condition: service_started
+    # volumes:
+    #   - ./backend:/app  # Commented out - overwrites compiled binary
+    networks:
+      - cerberus-network
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: ../docker/Dockerfile.web
+    container_name: cerberus-web
+    environment:
+      VITE_API_URL: http://localhost:8080/api/v1
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - api
+    networks:
+      - cerberus-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  nats_data:
+  rustfs_data:
+
+networks:
+  cerberus-network:
+    driver: bridge
