@@ -11,6 +11,9 @@
 *.test
 *.out
 go.work
+backend/api
+backend/worker
+backend/migrate
 
 # Rust
 rustfs/target/
