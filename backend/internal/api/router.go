@@ -2,14 +2,28 @@ package api
 
 import (
 	"net/http"
+	"os"
 
+	"github.com/cerberus/backend/internal/modules/artifacts"
 	"github.com/cerberus/backend/internal/platform/db"
+	"github.com/cerberus/backend/internal/platform/storage"
 	"github.com/go-chi/chi/v5"
 )
 
 // NewRouter creates a new API router
 func NewRouter(database *db.DB) chi.Router {
 	r := chi.NewRouter()
+
+	// Initialize storage client
+	storageEndpoint := os.Getenv("STORAGE_ENDPOINT")
+	if storageEndpoint == "" {
+		storageEndpoint = "http://localhost:9000"
+	}
+	storageClient := storage.NewRustFSClient(storageEndpoint)
+
+	// Initialize artifacts module
+	artifactsRepo := artifacts.NewRepository(database)
+	artifactsService := artifacts.NewService(artifactsRepo, storageClient)
 
 	// Auth routes (public)
 	r.Route("/auth", func(r chi.Router) {
@@ -18,7 +32,10 @@ func NewRouter(database *db.DB) chi.Router {
 		r.Post("/refresh", handleRefreshToken(database))
 	})
 
-	// Protected routes (require authentication)
+	// Artifacts routes (Phase 2: no auth required yet)
+	artifacts.RegisterRoutes(r, artifactsService)
+
+	// Protected routes (require authentication) - Phase 3
 	// r.Group(func(r chi.Router) {
 	// 	r.Use(authMiddleware)
 
