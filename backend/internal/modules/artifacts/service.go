@@ -26,7 +26,15 @@ type RepositoryInterface interface {
 	Delete(ctx context.Context, artifactID uuid.UUID) error
 	UpdateStatus(ctx context.Context, artifactID uuid.UUID, status string) error
 	SaveChunks(ctx context.Context, artifactID uuid.UUID, chunks []Chunk) error
+	GetChunks(ctx context.Context, artifactID uuid.UUID) ([]ArtifactChunk, error)
 	GetMetadata(ctx context.Context, artifactID uuid.UUID) (*ArtifactWithMetadata, error)
+	SaveSummary(ctx context.Context, summary *ArtifactSummary) error
+	SaveTopics(ctx context.Context, topics []Topic) error
+	SavePersons(ctx context.Context, persons []Person) error
+	SaveFacts(ctx context.Context, facts []Fact) error
+	SaveInsights(ctx context.Context, insights []Insight) error
+	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error)
 }
 
 // DBExecutor defines methods for direct database access (for metadata clearing)

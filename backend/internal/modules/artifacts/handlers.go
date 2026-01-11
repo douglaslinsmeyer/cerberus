@@ -63,7 +63,7 @@ func handleUpload(service *Service) http.HandlerFunc {
 		uploadedBy := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 
 		// Upload artifact
-		artifact, err := service.UploadArtifact(r.Context(), &UploadRequest{
+		artifactID, err := service.UploadArtifact(r.Context(), UploadRequest{
 			ProgramID:  programID,
 			Filename:   header.Filename,
 			MimeType:   header.Header.Get("Content-Type"),
@@ -76,7 +76,10 @@ func handleUpload(service *Service) http.HandlerFunc {
 			return
 		}
 
-		respondCreated(w, artifact)
+		respondCreated(w, map[string]string{
+			"artifact_id": artifactID.String(),
+			"message":     "Artifact uploaded successfully. AI analysis queued.",
+		})
 	}
 }
 
@@ -111,7 +114,7 @@ func handleList(service *Service) http.HandlerFunc {
 			}
 		}
 
-		artifacts, err := service.ListArtifacts(r.Context(), programID, limit, offset, status)
+		artifacts, err := service.ListArtifacts(r.Context(), programID, status, limit, offset)
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -244,7 +247,7 @@ func handleReanalyze(service *Service) http.HandlerFunc {
 func handleSearch(service *Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		programIDStr := chi.URLParam(r, "programId")
-		programID, err := uuid.Parse(programIDStr)
+		_, err := uuid.Parse(programIDStr)
 		if err != nil {
 			respondError(w, http.StatusBadRequest, "Invalid program ID")
 			return

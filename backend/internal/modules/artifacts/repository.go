@@ -20,6 +20,16 @@ func NewRepository(database *db.DB) *Repository {
 	return &Repository{db: database}
 }
 
+// ExecContext executes a query without returning rows
+func (r *Repository) ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
+	return r.db.ExecContext(ctx, query, args...)
+}
+
+// QueryContext executes a query that returns rows
+func (r *Repository) QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error) {
+	return r.db.QueryContext(ctx, query, args...)
+}
+
 // Create inserts a new artifact
 func (r *Repository) Create(ctx context.Context, artifact *Artifact) error {
 	query := `
