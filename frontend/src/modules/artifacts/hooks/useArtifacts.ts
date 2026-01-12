@@ -67,7 +67,11 @@ export function useReanalyzeArtifact(programId: string) {
   return useMutation({
     mutationFn: (artifactId: string) => artifactsApi.reanalyze(programId, artifactId),
     onSuccess: (_, artifactId) => {
+      // Invalidate metadata query (most important - this is what the detail page uses)
+      queryClient.invalidateQueries({ queryKey: ['artifact', programId, artifactId, 'metadata'] })
+      // Also invalidate base artifact query
       queryClient.invalidateQueries({ queryKey: ['artifact', programId, artifactId] })
+      // And the list view
       queryClient.invalidateQueries({ queryKey: ['artifacts', programId] })
     },
   })
