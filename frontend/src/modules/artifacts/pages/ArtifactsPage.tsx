@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { MagnifyingGlassIcon } from '@heroicons/react/24/outline'
+import { Link } from 'react-router-dom'
+import { MagnifyingGlassIcon, ArrowLeftIcon } from '@heroicons/react/24/outline'
 import { useArtifacts } from '../hooks/useArtifacts'
 import { ArtifactUploader } from '../components/ArtifactUploader'
 import { ArtifactList } from '../components/ArtifactList'
@@ -25,6 +26,15 @@ export function ArtifactsPage() {
       {/* Header */}
       <div className="bg-white shadow">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <div className="mb-2">
+            <Link
+              to={`/programs/${DEFAULT_PROGRAM_ID}`}
+              className="inline-flex items-center text-sm text-gray-600 hover:text-gray-900"
+            >
+              <ArrowLeftIcon className="h-4 w-4 mr-1" />
+              Back to Program Dashboard
+            </Link>
+          </div>
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold text-gray-900">Artifacts</h1>
