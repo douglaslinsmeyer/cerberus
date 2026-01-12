@@ -9,6 +9,22 @@ const api = axios.create({
   },
 })
 
+// Nullable types from Go sql.Null* structures
+export interface NullString {
+  String: string
+  Valid: boolean
+}
+
+export interface NullInt32 {
+  Int32: number
+  Valid: boolean
+}
+
+export interface NullFloat64 {
+  Float64: number
+  Valid: boolean
+}
+
 // Types
 export interface Artifact {
   artifact_id: string
@@ -31,9 +47,9 @@ export interface Topic {
 export interface Person {
   person_id: string
   person_name: string
-  person_role?: string
-  person_organization?: string
-  confidence_score: number
+  person_role?: NullString
+  person_organization?: NullString
+  confidence_score: NullFloat64
 }
 
 export interface Fact {
@@ -41,7 +57,7 @@ export interface Fact {
   fact_type: string
   fact_key: string
   fact_value: string
-  confidence_score: number
+  confidence_score: NullFloat64
 }
 
 export interface Insight {
@@ -49,15 +65,15 @@ export interface Insight {
   insight_type: string
   title: string
   description: string
-  severity?: string
-  suggested_action?: string
-  confidence_score: number
+  severity?: NullString
+  suggested_action?: NullString
+  confidence_score: NullFloat64
 }
 
 export interface ArtifactSummary {
   executive_summary: string
-  sentiment?: string
-  priority?: number
+  sentiment?: NullString
+  priority?: NullInt32
 }
 
 export interface ArtifactWithMetadata extends Artifact {

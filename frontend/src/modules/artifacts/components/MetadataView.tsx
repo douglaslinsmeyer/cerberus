@@ -48,20 +48,20 @@ export function MetadataView({ artifact }: MetadataViewProps) {
               <p className="mt-2 text-gray-700">{artifact.summary.executive_summary}</p>
 
               <div className="mt-4 flex items-center space-x-4">
-                {artifact.summary.sentiment && (
+                {artifact.summary.sentiment?.Valid && (
                   <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${
-                    artifact.summary.sentiment === 'positive' ? 'bg-green-100 text-green-800' :
-                    artifact.summary.sentiment === 'concern' ? 'bg-yellow-100 text-yellow-800' :
-                    artifact.summary.sentiment === 'negative' ? 'bg-red-100 text-red-800' :
+                    artifact.summary.sentiment.String === 'positive' ? 'bg-green-100 text-green-800' :
+                    artifact.summary.sentiment.String === 'concern' ? 'bg-yellow-100 text-yellow-800' :
+                    artifact.summary.sentiment.String === 'negative' ? 'bg-red-100 text-red-800' :
                     'bg-gray-100 text-gray-800'
                   }`}>
-                    Sentiment: {artifact.summary.sentiment}
+                    Sentiment: {artifact.summary.sentiment.String}
                   </span>
                 )}
 
-                {artifact.summary.priority && (
+                {artifact.summary.priority?.Valid && (
                   <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-purple-100 text-purple-800">
-                    Priority: {artifact.summary.priority}/5
+                    Priority: {artifact.summary.priority.Int32}/5
                   </span>
                 )}
               </div>
@@ -107,16 +107,18 @@ export function MetadataView({ artifact }: MetadataViewProps) {
                   <div key={person.person_id} className="flex items-start justify-between">
                     <div>
                       <p className="font-medium text-gray-900">{person.person_name}</p>
-                      {person.person_role && (
-                        <p className="text-sm text-gray-600">{person.person_role}</p>
+                      {person.person_role?.Valid && (
+                        <p className="text-sm text-gray-600">{person.person_role.String}</p>
                       )}
-                      {person.person_organization && (
-                        <p className="text-sm text-gray-500">{person.person_organization}</p>
+                      {person.person_organization?.Valid && (
+                        <p className="text-sm text-gray-500">{person.person_organization.String}</p>
                       )}
                     </div>
-                    <span className="text-xs text-gray-500">
-                      {(person.confidence_score * 100).toFixed(0)}% confidence
-                    </span>
+                    {person.confidence_score?.Valid && (
+                      <span className="text-xs text-gray-500">
+                        {(person.confidence_score.Float64 * 100).toFixed(0)}% confidence
+                      </span>
+                    )}
                   </div>
                 ))}
               </div>
@@ -138,9 +140,11 @@ export function MetadataView({ artifact }: MetadataViewProps) {
                     <p className="text-xs text-gray-500 uppercase">{fact.fact_type}</p>
                     <p className="mt-1 font-medium text-gray-900">{fact.fact_key}</p>
                     <p className="mt-1 text-sm text-gray-700">{fact.fact_value}</p>
-                    <p className="mt-1 text-xs text-gray-500">
-                      {(fact.confidence_score * 100).toFixed(0)}% confidence
-                    </p>
+                    {fact.confidence_score?.Valid && (
+                      <p className="mt-1 text-xs text-gray-500">
+                        {(fact.confidence_score.Float64 * 100).toFixed(0)}% confidence
+                      </p>
+                    )}
                   </div>
                 ))}
               </div>
@@ -157,47 +161,52 @@ export function MetadataView({ artifact }: MetadataViewProps) {
             <div className="ml-4 flex-1">
               <h2 className="text-lg font-semibold text-gray-900">AI Insights</h2>
               <div className="mt-4 space-y-4">
-                {artifact.insights.map((insight) => (
-                  <div
-                    key={insight.insight_id}
-                    className={`border-l-4 rounded-r-lg p-4 ${
-                      insight.severity === 'critical' ? 'border-red-500 bg-red-50' :
-                      insight.severity === 'high' ? 'border-orange-500 bg-orange-50' :
-                      insight.severity === 'medium' ? 'border-yellow-500 bg-yellow-50' :
-                      'border-blue-500 bg-blue-50'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center space-x-2">
-                          <span className="text-xs font-medium text-gray-500 uppercase">
-                            {insight.insight_type}
-                          </span>
-                          {insight.severity && (
-                            <span className={`text-xs px-2 py-0.5 rounded ${
-                              insight.severity === 'critical' ? 'bg-red-200 text-red-800' :
-                              insight.severity === 'high' ? 'bg-orange-200 text-orange-800' :
-                              insight.severity === 'medium' ? 'bg-yellow-200 text-yellow-800' :
-                              'bg-blue-200 text-blue-800'
-                            }`}>
-                              {insight.severity}
+                {artifact.insights.map((insight) => {
+                  const severityValue = insight.severity?.Valid ? insight.severity.String : 'low'
+                  return (
+                    <div
+                      key={insight.insight_id}
+                      className={`border-l-4 rounded-r-lg p-4 ${
+                        severityValue === 'critical' ? 'border-red-500 bg-red-50' :
+                        severityValue === 'high' ? 'border-orange-500 bg-orange-50' :
+                        severityValue === 'medium' ? 'border-yellow-500 bg-yellow-50' :
+                        'border-blue-500 bg-blue-50'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center space-x-2">
+                            <span className="text-xs font-medium text-gray-500 uppercase">
+                              {insight.insight_type}
                             </span>
+                            {insight.severity?.Valid && (
+                              <span className={`text-xs px-2 py-0.5 rounded ${
+                                severityValue === 'critical' ? 'bg-red-200 text-red-800' :
+                                severityValue === 'high' ? 'bg-orange-200 text-orange-800' :
+                                severityValue === 'medium' ? 'bg-yellow-200 text-yellow-800' :
+                                'bg-blue-200 text-blue-800'
+                              }`}>
+                                {severityValue}
+                              </span>
+                            )}
+                          </div>
+                          <h3 className="mt-1 font-semibold text-gray-900">{insight.title}</h3>
+                          <p className="mt-2 text-sm text-gray-700">{insight.description}</p>
+                          {insight.suggested_action?.Valid && (
+                            <p className="mt-2 text-sm text-gray-600">
+                              <span className="font-medium">Suggested Action:</span> {insight.suggested_action.String}
+                            </p>
                           )}
                         </div>
-                        <h3 className="mt-1 font-semibold text-gray-900">{insight.title}</h3>
-                        <p className="mt-2 text-sm text-gray-700">{insight.description}</p>
-                        {insight.suggested_action && (
-                          <p className="mt-2 text-sm text-gray-600">
-                            <span className="font-medium">Suggested Action:</span> {insight.suggested_action}
-                          </p>
+                        {insight.confidence_score?.Valid && (
+                          <span className="text-xs text-gray-500 ml-4">
+                            {(insight.confidence_score.Float64 * 100).toFixed(0)}%
+                          </span>
                         )}
                       </div>
-                      <span className="text-xs text-gray-500 ml-4">
-                        {(insight.confidence_score * 100).toFixed(0)}%
-                      </span>
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           </div>
