@@ -163,11 +163,11 @@ func (r *Repository) UpdateStatus(ctx context.Context, artifactID uuid.UUID, sta
 	query := `
 		UPDATE artifacts
 		SET processing_status = $1,
-		    processed_at = CASE WHEN $1 IN ('completed', 'failed') THEN NOW() ELSE processed_at END
-		WHERE artifact_id = $2
+		    processed_at = CASE WHEN $2 IN ('completed', 'failed') THEN NOW() ELSE processed_at END
+		WHERE artifact_id = $3
 	`
 
-	_, err := r.db.ExecContext(ctx, query, status, artifactID)
+	_, err := r.db.ExecContext(ctx, query, status, status, artifactID)
 	if err != nil {
 		return fmt.Errorf("failed to update artifact status: %w", err)
 	}

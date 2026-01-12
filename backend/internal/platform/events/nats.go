@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 
 	"github.com/nats-io/nats.go"
@@ -87,7 +88,9 @@ func (b *NATSBus) Start(ctx context.Context) error {
 	for eventType := range b.handlers {
 		subject := fmt.Sprintf("events.%s", eventType)
 
-		// Create durable consumer
+		// Create durable consumer (replace periods with underscores for valid NATS name)
+		consumerName := strings.ReplaceAll(string(eventType), ".", "_") + "_consumer"
+
 		_, err := b.js.Subscribe(subject, func(msg *nats.Msg) {
 			// Parse event
 			var event Event
@@ -111,7 +114,7 @@ func (b *NATSBus) Start(ctx context.Context) error {
 
 			// Acknowledge message
 			msg.Ack()
-		}, nats.Durable(fmt.Sprintf("%s-consumer", eventType)))
+		}, nats.Durable(consumerName))
 
 		if err != nil {
 			return fmt.Errorf("failed to subscribe to %s: %w", subject, err)

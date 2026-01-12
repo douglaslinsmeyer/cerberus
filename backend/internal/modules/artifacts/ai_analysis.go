@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/cerberus/backend/internal/platform/ai"
@@ -119,6 +120,10 @@ func (a *AIAnalyzer) AnalyzeArtifact(ctx context.Context, artifact *Artifact, pr
 
 	// Parse JSON response
 	responseText := resp.GetExtractedText()
+
+	// Strip markdown code blocks if present
+	responseText = stripMarkdownCodeBlocks(responseText)
+
 	var extraction AIExtractionResponse
 	if err := json.Unmarshal([]byte(responseText), &extraction); err != nil {
 		return nil, fmt.Errorf("failed to parse AI response: %w", err)
@@ -277,4 +282,25 @@ func (a *AIAnalyzer) ProcessArtifact(ctx context.Context, artifact *Artifact, pr
 	}
 
 	return nil
+}
+
+// stripMarkdownCodeBlocks removes markdown code block wrappers from text
+func stripMarkdownCodeBlocks(text string) string {
+	// Remove ```json\n and ``` markers
+	text = strings.TrimSpace(text)
+
+	// Check if wrapped in code blocks
+	if strings.HasPrefix(text, "```") {
+		// Find the first newline after ```
+		firstNewline := strings.Index(text, "\n")
+		if firstNewline > 0 {
+			text = text[firstNewline+1:]
+		}
+
+		// Remove trailing ```
+		text = strings.TrimSuffix(text, "```")
+		text = strings.TrimSpace(text)
+	}
+
+	return text
 }
