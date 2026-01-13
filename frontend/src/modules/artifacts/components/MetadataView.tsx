@@ -12,6 +12,24 @@ interface MetadataViewProps {
 }
 
 export function MetadataView({ artifact }: MetadataViewProps) {
+  if (artifact.processing_status === 'ocr_required') {
+    return (
+      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-8 text-center">
+        <ExclamationTriangleIcon className="h-12 w-12 text-yellow-600 mx-auto" />
+        <p className="mt-4 text-yellow-700 font-medium">OCR Required</p>
+        <p className="mt-2 text-sm text-yellow-600">
+          This appears to be a scanned PDF or image-based document.
+        </p>
+        <p className="mt-1 text-sm text-yellow-600">
+          OCR (Optical Character Recognition) will be added in a future release.
+        </p>
+        <p className="mt-3 text-xs text-yellow-500">
+          For now, please use text-based PDFs or manually enter the document content.
+        </p>
+      </div>
+    )
+  }
+
   if (artifact.processing_status === 'pending' || artifact.processing_status === 'processing') {
     return (
       <div className="bg-blue-50 border border-blue-200 rounded-lg p-8 text-center">

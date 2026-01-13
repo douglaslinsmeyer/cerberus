@@ -108,20 +108,38 @@ func (s *Service) UploadArtifact(ctx context.Context, req UploadRequest) (uuid.U
 
 	// Extract text content
 	rawContent, err := s.extractors.Extract(ctx, req.MimeType, req.Data)
-	if err != nil {
-		// Clean up uploaded file on extraction failure
-		_ = s.storage.Delete(ctx, fileInfo.ID)
-		return uuid.Nil, fmt.Errorf("failed to extract content: %w", err)
-	}
+	var chunks []Chunk
 
-	// Chunk the document
-	chunks := s.chunker.ChunkDocument(rawContent)
+	if err != nil {
+		// Check if this is a "no text content" error (likely scanned PDF)
+		if containsString(err.Error(), "no text content") {
+			// Allow upload but mark for manual review
+			rawContent = ""
+			chunks = []Chunk{} // No chunks for OCR-needed files
+			// Continue with artifact creation with empty content
+		} else {
+			// Other extraction errors should fail
+			_ = s.storage.Delete(ctx, fileInfo.ID)
+			return uuid.Nil, fmt.Errorf("failed to extract content: %w", err)
+		}
+	} else {
+		// Successfully extracted text - chunk it
+		chunks = s.chunker.ChunkDocument(rawContent)
+	}
 
 	// Determine file type from MIME type or extension
 	fileType := s.inferFileType(req.MimeType, req.Filename)
 
 	// Create artifact record
 	artifactID := uuid.New()
+	processingStatus := "pending"
+	hasContent := rawContent != ""
+
+	// If no content extracted (scanned PDF), mark as needing OCR
+	if !hasContent {
+		processingStatus = "ocr_required"
+	}
+
 	artifact := &Artifact{
 		ArtifactID:       artifactID,
 		ProgramID:        req.ProgramID,
@@ -131,8 +149,8 @@ func (s *Service) UploadArtifact(ctx context.Context, req UploadRequest) (uuid.U
 		FileSizeBytes:    fileInfo.Size,
 		MimeType:         req.MimeType,
 		ContentHash:      contentHash,
-		RawContent:       sql.NullString{String: rawContent, Valid: true},
-		ProcessingStatus: "pending",
+		RawContent:       sql.NullString{String: rawContent, Valid: hasContent},
+		ProcessingStatus: processingStatus,
 		UploadedBy:       req.UploadedBy,
 		UploadedAt:       time.Now(),
 		VersionNumber:    1,
@@ -453,4 +471,19 @@ func (s *Service) inferFileType(mimeType, filename string) string {
 
 	// Default to unknown
 	return "unknown"
+}
+
+// containsString checks if a string contains a substring (case-insensitive)
+func containsString(s, substr string) bool {
+	return len(s) >= len(substr) &&
+		stringContains(strings.ToLower(s), strings.ToLower(substr))
+}
+
+func stringContains(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }
