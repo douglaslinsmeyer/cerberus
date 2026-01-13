@@ -13,6 +13,7 @@ import (
 	"github.com/cerberus/backend/internal/platform/ai"
 	"github.com/cerberus/backend/internal/platform/db"
 	"github.com/cerberus/backend/internal/platform/events"
+	"github.com/cerberus/backend/internal/platform/storage"
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	"github.com/redis/go-redis/v9"
@@ -67,10 +68,15 @@ func main() {
 		MetricsTracker: metricsTracker,
 	})
 
+	// Create storage client for OCR
+	storageEndpoint := getEnv("STORAGE_ENDPOINT", "http://rustfs:9000")
+	storageClient := storage.NewRustFSClient(storageEndpoint)
+
 	// Create artifacts repository and analyzer
 	artifactsRepo := artifacts.NewRepository(database)
 	aiAnalyzer := artifacts.NewAIAnalyzer(claudeClient, artifactsRepo)
 	embeddingsService := artifacts.NewEmbeddingsService(openaiKey, artifactsRepo)
+	ocrService := artifacts.NewOCRService(artifactsRepo, storageClient)
 
 	// Create event bus
 	eventBus, err := events.NewNATSBus(natsURL)
@@ -195,7 +201,56 @@ func main() {
 		}
 	}()
 
-	log.Println("Worker started, processing artifacts...")
+	// Poll for OCR-required artifacts
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				// Get OCR-required artifacts
+				rows, err := database.QueryContext(ctx, `
+					SELECT artifact_id FROM artifacts
+					WHERE processing_status = 'ocr_required'
+					  AND deleted_at IS NULL
+					ORDER BY uploaded_at ASC
+					LIMIT 5
+				`)
+				if err != nil {
+					log.Printf("Failed to query OCR artifacts: %v", err)
+					continue
+				}
+
+				var ocrArtifacts []uuid.UUID
+				for rows.Next() {
+					var id uuid.UUID
+					if err := rows.Scan(&id); err != nil {
+						log.Printf("Failed to scan artifact ID: %v", err)
+						continue
+					}
+					ocrArtifacts = append(ocrArtifacts, id)
+				}
+				rows.Close()
+
+				// Process each OCR artifact
+				for _, artifactID := range ocrArtifacts {
+					log.Printf("Processing OCR-required artifact: %s", artifactID)
+
+					if err := ocrService.ProcessOCRRequired(ctx, artifactID); err != nil {
+						log.Printf("Failed to process OCR for %s: %v", artifactID, err)
+						continue
+					}
+
+					log.Printf("OCR completed for artifact: %s (now pending AI analysis)", artifactID)
+				}
+			}
+		}
+	}()
+
+	log.Println("Worker started, processing artifacts and OCR...")
 
 	// Wait for interrupt signal
 	sigChan := make(chan os.Signal, 1)

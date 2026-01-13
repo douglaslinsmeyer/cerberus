@@ -41,7 +41,8 @@ export function useUploadArtifact(programId: string) {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (file: File) => artifactsApi.upload(programId, file),
+    mutationFn: ({ file, force = false }: { file: File; force?: boolean }) =>
+      artifactsApi.upload(programId, file, force),
     onSuccess: () => {
       // Invalidate artifacts list to refresh
       queryClient.invalidateQueries({ queryKey: ['artifacts', programId] })

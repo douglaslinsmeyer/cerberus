@@ -95,6 +95,24 @@ func (s *Service) UploadArtifact(ctx context.Context, req UploadRequest) (uuid.U
 	hasher.Write(req.Data)
 	contentHash := hex.EncodeToString(hasher.Sum(nil))
 
+	// Check for duplicates using smart deduplication
+	dupCheck, err := s.CheckDuplicate(ctx, req.ProgramID, contentHash)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("failed to check duplicate: %w", err)
+	}
+
+	if dupCheck.Exists && !dupCheck.AllowUpload && !req.ForceUpload {
+		return uuid.Nil, &DuplicateError{
+			ExistingArtifactID: dupCheck.ArtifactID,
+			Status:             dupCheck.Status,
+		}
+	}
+
+	// If duplicate exists and is allowed (failed/ocr_required/force), soft-delete the old one
+	if dupCheck.Exists && (dupCheck.AllowUpload || req.ForceUpload) {
+		_ = s.repo.Delete(ctx, dupCheck.ArtifactID)
+	}
+
 	// Check if extractor is available for this MIME type
 	if !s.extractors.CanExtract(req.MimeType) {
 		return uuid.Nil, fmt.Errorf("unsupported file type: %s", req.MimeType)
@@ -433,6 +451,50 @@ func (s *Service) clearArtifactMetadata(ctx context.Context, artifactID uuid.UUI
 	}
 
 	return nil
+}
+
+// CheckDuplicate checks if a duplicate artifact exists and if upload should be allowed
+func (s *Service) CheckDuplicate(ctx context.Context, programID uuid.UUID, contentHash string) (*DuplicateCheck, error) {
+	query := `
+		SELECT artifact_id, processing_status, deleted_at
+		FROM artifacts
+		WHERE program_id = $1
+		  AND content_hash = $2
+		  AND deleted_at IS NULL
+		ORDER BY uploaded_at DESC
+		LIMIT 1
+	`
+
+	rows, err := s.db.QueryContext(ctx, query, programID, contentHash)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query duplicate: %w", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		// No duplicate found
+		return &DuplicateCheck{Exists: false}, nil
+	}
+
+	var artifactID uuid.UUID
+	var status string
+	var deletedAt sql.NullTime
+
+	if err := rows.Scan(&artifactID, &status, &deletedAt); err != nil {
+		return nil, fmt.Errorf("failed to scan duplicate: %w", err)
+	}
+
+	// Smart deduplication: Allow upload if original artifact needs reprocessing
+	allowDuplicate := deletedAt.Valid || // Soft-deleted
+		status == "failed" || // Failed processing
+		status == "ocr_required" // Needs OCR
+
+	return &DuplicateCheck{
+		Exists:      true,
+		ArtifactID:  artifactID,
+		Status:      status,
+		AllowUpload: allowDuplicate,
+	}, nil
 }
 
 // inferFileType determines file type from MIME type or filename extension

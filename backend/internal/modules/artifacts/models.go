@@ -2,6 +2,7 @@ package artifacts
 
 import (
 	"database/sql"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -139,11 +140,30 @@ type ArtifactWithMetadata struct {
 
 // UploadRequest represents an artifact upload request
 type UploadRequest struct {
-	ProgramID uuid.UUID
-	Filename  string
-	MimeType  string
-	Data      []byte
+	ProgramID  uuid.UUID
+	Filename   string
+	MimeType   string
+	Data       []byte
 	UploadedBy uuid.UUID
+	ForceUpload bool // Allow re-upload even if duplicate exists
+}
+
+// DuplicateError indicates a duplicate artifact exists
+type DuplicateError struct {
+	ExistingArtifactID uuid.UUID
+	Status             string
+}
+
+func (e *DuplicateError) Error() string {
+	return fmt.Sprintf("duplicate artifact exists (status: %s)", e.Status)
+}
+
+// DuplicateCheck contains results of duplicate checking
+type DuplicateCheck struct {
+	Exists      bool
+	ArtifactID  uuid.UUID
+	Status      string
+	AllowUpload bool
 }
 
 // SearchRequest represents a semantic search request

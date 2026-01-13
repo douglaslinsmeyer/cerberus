@@ -1,4 +1,5 @@
-import { useCallback } from 'react'
+import { useCallback, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useDropzone } from 'react-dropzone'
 import { ArrowUpTrayIcon, DocumentIcon } from '@heroicons/react/24/outline'
 import { useUploadArtifact } from '../hooks/useArtifacts'
@@ -10,16 +11,44 @@ interface ArtifactUploaderProps {
 
 export function ArtifactUploader({ programId, onUploadSuccess }: ArtifactUploaderProps) {
   const uploadMutation = useUploadArtifact(programId)
+  const [duplicateInfo, setDuplicateInfo] = useState<{
+    existingId: string
+    status: string
+    file: File
+  } | null>(null)
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     acceptedFiles.forEach((file) => {
-      uploadMutation.mutate(file, {
+      uploadMutation.mutate({ file, force: false }, {
         onSuccess: () => {
+          setDuplicateInfo(null)
           onUploadSuccess?.()
+        },
+        onError: (error: any) => {
+          // Check for duplicate conflict (409)
+          if (error.response?.status === 409) {
+            const data = error.response.data
+            setDuplicateInfo({
+              existingId: data.existing_artifact_id,
+              status: data.existing_status,
+              file: file,
+            })
+          }
         },
       })
     })
   }, [uploadMutation, onUploadSuccess])
+
+  const handleForceUpload = () => {
+    if (!duplicateInfo) return
+
+    uploadMutation.mutate({ file: duplicateInfo.file, force: true }, {
+      onSuccess: () => {
+        setDuplicateInfo(null)
+        onUploadSuccess?.()
+      },
+    })
+  }
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -75,7 +104,39 @@ export function ArtifactUploader({ programId, onUploadSuccess }: ArtifactUploade
         </div>
       )}
 
-      {uploadMutation.isError && (
+      {duplicateInfo && (
+        <div className="mt-4 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+          <p className="text-sm text-yellow-700 font-medium">
+            Duplicate File Detected
+          </p>
+          <p className="mt-1 text-sm text-yellow-600">
+            This file was already uploaded (status: {duplicateInfo.status}).
+          </p>
+          <div className="mt-3 flex space-x-3">
+            <Link
+              to={`/programs/${programId}/artifacts/${duplicateInfo.existingId}`}
+              className="inline-flex items-center px-3 py-2 text-sm font-medium text-blue-600 hover:text-blue-700"
+            >
+              View Existing Artifact →
+            </Link>
+            <button
+              onClick={handleForceUpload}
+              disabled={uploadMutation.isPending}
+              className="inline-flex items-center px-3 py-2 text-sm font-medium text-orange-600 hover:text-orange-700 disabled:opacity-50"
+            >
+              Replace & Re-upload
+            </button>
+            <button
+              onClick={() => setDuplicateInfo(null)}
+              className="inline-flex items-center px-3 py-2 text-sm font-medium text-gray-600 hover:text-gray-700"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {uploadMutation.isError && !duplicateInfo && (
         <div className="mt-4 bg-red-50 border border-red-200 rounded-lg p-4">
           <p className="text-sm text-red-700">
             Error: {uploadMutation.error instanceof Error ? uploadMutation.error.message : 'Upload failed'}

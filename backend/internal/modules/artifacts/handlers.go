@@ -62,16 +62,33 @@ func handleUpload(service *Service) http.HandlerFunc {
 		// TODO: Get uploadedBy from JWT claims (for now use hardcoded value)
 		uploadedBy := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 
+		// Parse force parameter from query string
+		forceUpload := r.URL.Query().Get("force") == "true"
+
 		// Upload artifact
 		artifactID, err := service.UploadArtifact(r.Context(), UploadRequest{
-			ProgramID:  programID,
-			Filename:   header.Filename,
-			MimeType:   header.Header.Get("Content-Type"),
-			Data:       data,
-			UploadedBy: uploadedBy,
+			ProgramID:   programID,
+			Filename:    header.Filename,
+			MimeType:    header.Header.Get("Content-Type"),
+			Data:        data,
+			UploadedBy:  uploadedBy,
+			ForceUpload: forceUpload,
 		})
 
 		if err != nil {
+			// Check if duplicate error
+			if dupErr, ok := err.(*DuplicateError); ok {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusConflict)
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"success":              false,
+					"error":                "Duplicate artifact already exists",
+					"existing_artifact_id": dupErr.ExistingArtifactID.String(),
+					"existing_status":      dupErr.Status,
+					"message":              "This file was already uploaded. Use ?force=true to replace it.",
+				})
+				return
+			}
 			respondError(w, http.StatusInternalServerError, err.Error())
 			return
 		}

@@ -93,11 +93,12 @@ export interface SearchResult {
 // Artifacts API
 export const artifactsApi = {
   // Upload artifact
-  upload: async (programId: string, file: File) => {
+  upload: async (programId: string, file: File, force = false) => {
     const formData = new FormData()
     formData.append('file', file)
 
-    const response = await api.post(`/programs/${programId}/artifacts/upload`, formData, {
+    const url = `/programs/${programId}/artifacts/upload${force ? '?force=true' : ''}`
+    const response = await api.post(url, formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
