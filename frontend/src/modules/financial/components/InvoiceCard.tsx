@@ -66,7 +66,7 @@ export function InvoiceCard({ invoice, programId, showVarianceAlert = false }: I
               {invoice.due_date?.Valid && (
                 <>
                   <span>•</span>
-                  <span>Due: {formatDate(invoice.due_date.String)}</span>
+                  <span>Due: {formatDate(invoice.due_date.Time)}</span>
                 </>
               )}
             </div>
