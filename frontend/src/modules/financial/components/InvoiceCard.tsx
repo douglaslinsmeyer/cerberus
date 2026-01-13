@@ -10,18 +10,51 @@ interface InvoiceCardProps {
 }
 
 export function InvoiceCard({ invoice, programId, showVarianceAlert = false }: InvoiceCardProps) {
+  // Payment status (financial state) - Blue theme
   const paymentStatusColors = {
-    pending: 'bg-yellow-100 text-yellow-800',
-    approved: 'bg-green-100 text-green-800',
-    rejected: 'bg-red-100 text-red-800',
-    paid: 'bg-blue-100 text-blue-800',
+    unpaid: 'bg-blue-100 text-blue-800 border-blue-200',
+    partial: 'bg-blue-100 text-blue-700 border-blue-200',
+    paid: 'bg-green-100 text-green-800 border-green-200',
+    overdue: 'bg-red-100 text-red-800 border-red-200',
   }
 
+  const paymentStatusLabels = {
+    unpaid: 'Unpaid',
+    partial: 'Partially Paid',
+    paid: 'Paid',
+    overdue: 'Overdue',
+  }
+
+  const paymentStatusTooltips = {
+    unpaid: 'Invoice has not been paid yet',
+    partial: 'Invoice has been partially paid',
+    paid: 'Invoice has been fully paid',
+    overdue: 'Invoice is past due date and unpaid',
+  }
+
+  // Processing status (approval workflow) - Purple/Orange theme
   const processingStatusColors = {
-    pending: 'bg-gray-100 text-gray-800',
-    processing: 'bg-blue-100 text-blue-800',
-    completed: 'bg-green-100 text-green-800',
-    failed: 'bg-red-100 text-red-800',
+    pending: 'bg-gray-100 text-gray-700 border-gray-300',
+    processing: 'bg-purple-100 text-purple-800 border-purple-200',
+    validated: 'bg-orange-100 text-orange-800 border-orange-200',
+    approved: 'bg-green-100 text-green-800 border-green-200',
+    rejected: 'bg-red-100 text-red-800 border-red-200',
+  }
+
+  const processingStatusLabels = {
+    pending: 'Pending',
+    processing: 'Processing',
+    validated: 'Validated',
+    approved: 'Approved',
+    rejected: 'Rejected',
+  }
+
+  const processingStatusTooltips = {
+    pending: 'Invoice uploaded, waiting for AI analysis',
+    processing: 'AI is currently analyzing this invoice',
+    validated: 'AI has validated this invoice - ready for your approval',
+    approved: 'Invoice has been approved by a manager',
+    rejected: 'Invoice has been rejected',
   }
 
   const formatCurrency = (value: number) => {
@@ -72,11 +105,17 @@ export function InvoiceCard({ invoice, programId, showVarianceAlert = false }: I
             </div>
 
             <div className="mt-3 flex items-center space-x-2">
-              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${paymentStatusColors[invoice.payment_status]}`}>
-                {invoice.payment_status}
+              <span
+                className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${processingStatusColors[invoice.processing_status as keyof typeof processingStatusColors]}`}
+                title={processingStatusTooltips[invoice.processing_status as keyof typeof processingStatusTooltips]}
+              >
+                📋 {processingStatusLabels[invoice.processing_status as keyof typeof processingStatusLabels] || invoice.processing_status}
               </span>
-              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${processingStatusColors[invoice.processing_status]}`}>
-                {invoice.processing_status}
+              <span
+                className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${paymentStatusColors[invoice.payment_status as keyof typeof paymentStatusColors]}`}
+                title={paymentStatusTooltips[invoice.payment_status as keyof typeof paymentStatusTooltips]}
+              >
+                💰 {paymentStatusLabels[invoice.payment_status as keyof typeof paymentStatusLabels] || invoice.payment_status}
               </span>
             </div>
           </div>

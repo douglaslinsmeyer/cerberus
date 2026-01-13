@@ -93,25 +93,43 @@ export function InvoiceDetailPage() {
             </div>
 
             <div className="flex items-center space-x-2">
-              {invoice.payment_status === 'pending' && (
+              {/* Show approve/reject buttons when validated (AI approved, waiting for human approval) */}
+              {invoice.processing_status === 'validated' && (
                 <>
                   <button
                     onClick={handleApprove}
                     disabled={approveMutation.isPending}
                     className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:opacity-50"
+                    title="Approve this invoice for payment"
                   >
                     <CheckCircleIcon className="h-4 w-4 mr-2" />
-                    Approve
+                    {approveMutation.isPending ? 'Approving...' : 'Approve Invoice'}
                   </button>
                   <button
                     onClick={() => setShowRejectDialog(true)}
                     disabled={rejectMutation.isPending}
                     className="inline-flex items-center px-4 py-2 border border-red-300 rounded-md shadow-sm text-sm font-medium text-red-700 bg-white hover:bg-red-50 disabled:opacity-50"
+                    title="Reject this invoice"
                   >
                     <XCircleIcon className="h-4 w-4 mr-2" />
-                    Reject
+                    Reject Invoice
                   </button>
                 </>
+              )}
+
+              {/* Show status for approved/rejected invoices */}
+              {invoice.processing_status === 'approved' && (
+                <div className="inline-flex items-center px-4 py-2 rounded-md bg-green-50 border border-green-200">
+                  <CheckCircleIcon className="h-5 w-5 text-green-600 mr-2" />
+                  <span className="text-sm font-medium text-green-800">Invoice Approved</span>
+                </div>
+              )}
+
+              {invoice.processing_status === 'rejected' && (
+                <div className="inline-flex items-center px-4 py-2 rounded-md bg-red-50 border border-red-200">
+                  <XCircleIcon className="h-5 w-5 text-red-600 mr-2" />
+                  <span className="text-sm font-medium text-red-800">Invoice Rejected</span>
+                </div>
               )}
             </div>
           </div>
@@ -119,6 +137,76 @@ export function InvoiceDetailPage() {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Help Text for Validated Status */}
+        {invoice.processing_status === 'validated' && (
+          <div className="mb-6 bg-orange-50 border border-orange-200 rounded-lg p-4">
+            <div className="flex">
+              <div className="flex-shrink-0">
+                <ExclamationTriangleIcon className="h-5 w-5 text-orange-600" />
+              </div>
+              <div className="ml-3">
+                <h3 className="text-sm font-medium text-orange-800">Action Required: Approve or Reject</h3>
+                <p className="mt-1 text-sm text-orange-700">
+                  AI has successfully validated this invoice and extracted all line items.
+                  Review the details below and approve for payment or reject if there are issues.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Workflow Status Indicator */}
+        <div className="mb-6 bg-white rounded-lg shadow p-4">
+          <h3 className="text-sm font-semibold text-gray-700 mb-3">Workflow Progress</h3>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-4">
+              <div className="flex items-center">
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold ${
+                  invoice.processing_status === 'pending' || invoice.processing_status === 'processing' || invoice.processing_status === 'validated' || invoice.processing_status === 'approved' ? 'bg-orange-500' : 'bg-gray-300'
+                }`}>
+                  1
+                </div>
+                <div className="ml-3">
+                  <p className="text-xs font-medium text-gray-900">Validated</p>
+                  <p className="text-xs text-gray-500">AI analyzed</p>
+                </div>
+              </div>
+
+              <div className={`flex-1 h-1 mx-2 ${
+                invoice.processing_status === 'approved' ? 'bg-green-500' : 'bg-gray-200'
+              }`}></div>
+
+              <div className="flex items-center">
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold ${
+                  invoice.processing_status === 'approved' ? 'bg-green-500' : 'bg-gray-300'
+                }`}>
+                  2
+                </div>
+                <div className="ml-3">
+                  <p className="text-xs font-medium text-gray-900">Approved</p>
+                  <p className="text-xs text-gray-500">Manager review</p>
+                </div>
+              </div>
+
+              <div className={`flex-1 h-1 mx-2 ${
+                invoice.payment_status === 'paid' ? 'bg-green-500' : 'bg-gray-200'
+              }`}></div>
+
+              <div className="flex items-center">
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold ${
+                  invoice.payment_status === 'paid' ? 'bg-green-500' : 'bg-gray-300'
+                }`}>
+                  3
+                </div>
+                <div className="ml-3">
+                  <p className="text-xs font-medium text-gray-900">Paid</p>
+                  <p className="text-xs text-gray-500">Payment sent</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* Invoice Summary */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
           <div className="lg:col-span-2">
@@ -168,6 +256,49 @@ export function InvoiceDetailPage() {
             <div className="bg-white rounded-lg shadow p-6">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">Total Amount</h3>
               <p className="text-3xl font-bold text-gray-900">{formatCurrency(invoice.total_amount)}</p>
+
+              {/* Status Badges with Tooltips */}
+              <div className="mt-4 space-y-2">
+                <div>
+                  <p className="text-xs text-gray-500 mb-1">Approval Status:</p>
+                  <span
+                    className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium border ${
+                      invoice.processing_status === 'validated' ? 'bg-orange-100 text-orange-800 border-orange-200' :
+                      invoice.processing_status === 'approved' ? 'bg-green-100 text-green-800 border-green-200' :
+                      invoice.processing_status === 'rejected' ? 'bg-red-100 text-red-800 border-red-200' :
+                      'bg-gray-100 text-gray-700 border-gray-300'
+                    }`}
+                    title={
+                      invoice.processing_status === 'validated' ? 'AI has validated - awaiting your approval' :
+                      invoice.processing_status === 'approved' ? 'Manager has approved this invoice' :
+                      invoice.processing_status === 'rejected' ? 'Invoice has been rejected' :
+                      'Processing'
+                    }
+                  >
+                    📋 {invoice.processing_status === 'validated' ? 'Validated (Ready to Approve)' : invoice.processing_status}
+                  </span>
+                </div>
+
+                <div>
+                  <p className="text-xs text-gray-500 mb-1">Payment Status:</p>
+                  <span
+                    className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium border ${
+                      invoice.payment_status === 'unpaid' ? 'bg-blue-100 text-blue-800 border-blue-200' :
+                      invoice.payment_status === 'paid' ? 'bg-green-100 text-green-800 border-green-200' :
+                      invoice.payment_status === 'overdue' ? 'bg-red-100 text-red-800 border-red-200' :
+                      'bg-gray-100 text-gray-700 border-gray-300'
+                    }`}
+                    title={
+                      invoice.payment_status === 'unpaid' ? 'Invoice has not been paid yet' :
+                      invoice.payment_status === 'paid' ? 'Invoice has been fully paid' :
+                      invoice.payment_status === 'overdue' ? 'Invoice is past due and unpaid' :
+                      'Payment tracking'
+                    }
+                  >
+                    💰 {invoice.payment_status === 'unpaid' ? 'Unpaid' : invoice.payment_status}
+                  </span>
+                </div>
+              </div>
 
               {lineItemsWithVariances.length > 0 && totalVarianceAmount !== 0 && (
                 <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
