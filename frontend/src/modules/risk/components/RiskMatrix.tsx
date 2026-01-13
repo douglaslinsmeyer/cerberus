@@ -1,3 +1,4 @@
+import React from 'react'
 import { Risk } from '@/services/api'
 
 interface RiskMatrixProps {
@@ -67,7 +68,7 @@ export function RiskMatrix({ risks, onRiskClick }: RiskMatrixProps) {
 
             {/* Matrix cells */}
             {[...PROBABILITY_LEVELS].reverse().map((probability) => (
-              <>
+              <React.Fragment key={`row-${probability}`}>
                 {/* Row header */}
                 <div key={`header-${probability}`} className="flex items-center justify-end pr-3 text-xs font-medium text-gray-600">
                   {formatLabel(probability)}
@@ -105,7 +106,7 @@ export function RiskMatrix({ risks, onRiskClick }: RiskMatrixProps) {
                     </div>
                   )
                 })}
-              </>
+              </React.Fragment>
             ))}
           </div>
 
