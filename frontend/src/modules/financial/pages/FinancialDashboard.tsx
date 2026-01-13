@@ -10,10 +10,13 @@ export function FinancialDashboard() {
   const currentYear = new Date().getFullYear()
 
   const { data: budgetStatus, isLoading: budgetLoading } = useBudgetStatus(programId || '', currentYear)
-  const { data: invoices = [], isLoading: invoicesLoading } = useInvoices(programId || '', { limit: 5 })
-  const { data: variances = [], isLoading: variancesLoading } = useVariances(programId || '')
+  const { data: invoices, isLoading: invoicesLoading } = useInvoices(programId || '', { limit: 5 })
+  const { data: variances, isLoading: variancesLoading } = useVariances(programId || '')
 
-  const activeVariances = variances.filter((v) => !v.is_dismissed && !v.resolved_at)
+  const safeInvoices = invoices || []
+  const safeVariances = variances || []
+
+  const activeVariances = safeVariances.filter((v) => !v.is_dismissed && !v.resolved_at)
   const criticalVariances = activeVariances.filter((v) => v.severity === 'critical')
   const highVariances = activeVariances.filter((v) => v.severity === 'high')
 
@@ -57,7 +60,7 @@ export function FinancialDashboard() {
             </div>
 
             <Link
-              to={`/programs/${programId}/financial/invoices`}
+              to={`/programs/${programId}/financial/safeInvoices`}
               className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
             >
               View All Invoices
@@ -159,20 +162,20 @@ export function FinancialDashboard() {
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-lg font-semibold text-gray-900">Recent Invoices</h3>
             <Link
-              to={`/programs/${programId}/financial/invoices`}
+              to={`/programs/${programId}/financial/safeInvoices`}
               className="text-sm text-blue-600 hover:text-blue-700"
             >
               View All
             </Link>
           </div>
 
-          {invoices.length === 0 ? (
+          {safeInvoices.length === 0 ? (
             <div className="text-center text-gray-500 py-8">
-              <p>No invoices yet</p>
+              <p>No safeInvoices yet</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {invoices.map((invoice) => (
+              {safeInvoices.map((invoice) => (
                 <InvoiceCard key={invoice.invoice_id} invoice={invoice} programId={programId || ''} />
               ))}
             </div>
