@@ -3,6 +3,7 @@ import { ArtifactsPage } from './modules/artifacts/pages/ArtifactsPage'
 import { ArtifactDetailPage } from './modules/artifacts/pages/ArtifactDetailPage'
 import { ProgramDashboard } from './modules/programs/pages/ProgramDashboard'
 import { ProgramListPage } from './modules/programs/pages/ProgramListPage'
+import { ProgramSettings } from './modules/programs/pages/ProgramSettings'
 import { FinancialDashboard } from './modules/financial/pages/FinancialDashboard'
 import { InvoiceListPage } from './modules/financial/pages/InvoiceListPage'
 import { InvoiceDetailPage } from './modules/financial/pages/InvoiceDetailPage'
@@ -18,6 +19,7 @@ function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/programs" element={<ProgramListPage />} />
         <Route path="/programs/:programId" element={<ProgramDashboard />} />
+        <Route path="/programs/:programId/settings" element={<ProgramSettings />} />
 
         {/* Artifacts Module */}
         <Route path="/programs/:programId/artifacts" element={<ArtifactsPage />} />

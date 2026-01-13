@@ -140,12 +140,20 @@ export function ProgramDashboard() {
               <p className="mt-2 text-sm text-gray-600">{program.description}</p>
             </div>
 
-            <Link
-              to="/"
-              className="text-sm text-gray-600 hover:text-gray-900"
-            >
-              ← Back to Home
-            </Link>
+            <div className="flex items-center space-x-4">
+              <Link
+                to={`/programs/${programId}/settings`}
+                className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+              >
+                ⚙️ Settings
+              </Link>
+              <Link
+                to="/"
+                className="text-sm text-gray-600 hover:text-gray-900"
+              >
+                ← Back to Home
+              </Link>
+            </div>
           </div>
         </div>
       </div>
