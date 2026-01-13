@@ -90,6 +90,41 @@ export interface SearchResult {
   snippet: string
 }
 
+// Program types
+export interface NullTime {
+  Time: string
+  Valid: boolean
+}
+
+export interface Program {
+  program_id: string
+  program_name: string
+  program_code: string
+  description?: NullString
+  start_date?: NullTime
+  end_date?: NullTime
+  status: 'active' | 'planning' | 'on-hold' | 'completed' | 'archived'
+  created_at: string
+  created_by: string
+  updated_at: string
+  updated_by?: NullString
+}
+
+export interface ProgramWithStats extends Program {
+  artifact_count: number
+  invoice_count: number
+  risk_count: number
+}
+
+export interface CreateProgramRequest {
+  program_name: string
+  program_code: string
+  description?: string
+  start_date?: string
+  end_date?: string
+  status: string
+}
+
 // Artifacts API
 export const artifactsApi = {
   // Upload artifact
@@ -677,6 +712,28 @@ export const riskApi = {
       message_format: messageFormat,
     })
     return response.data.data
+  },
+}
+
+// Programs API
+export const programsApi = {
+  listPrograms: async (params?: { status?: string; search?: string }) => {
+    const response = await api.get('/programs', { params })
+    return response.data.data.programs as ProgramWithStats[]
+  },
+
+  getProgram: async (programId: string) => {
+    const response = await api.get(`/programs/${programId}`)
+    return response.data.data as ProgramWithStats
+  },
+
+  createProgram: async (request: CreateProgramRequest) => {
+    const response = await api.post('/programs', request)
+    return response.data.data
+  },
+
+  updateProgram: async (programId: string, updates: Partial<Program>) => {
+    await api.patch(`/programs/${programId}`, updates)
   },
 }
 

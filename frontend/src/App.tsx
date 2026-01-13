@@ -2,6 +2,7 @@ import { Routes, Route, Link } from 'react-router-dom'
 import { ArtifactsPage } from './modules/artifacts/pages/ArtifactsPage'
 import { ArtifactDetailPage } from './modules/artifacts/pages/ArtifactDetailPage'
 import { ProgramDashboard } from './modules/programs/pages/ProgramDashboard'
+import { ProgramListPage } from './modules/programs/pages/ProgramListPage'
 import { FinancialDashboard } from './modules/financial/pages/FinancialDashboard'
 import { InvoiceListPage } from './modules/financial/pages/InvoiceListPage'
 import { InvoiceDetailPage } from './modules/financial/pages/InvoiceDetailPage'
@@ -15,6 +16,7 @@ function App() {
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/programs" element={<ProgramListPage />} />
         <Route path="/programs/:programId" element={<ProgramDashboard />} />
 
         {/* Artifacts Module */}
@@ -55,16 +57,16 @@ function HomePage() {
 
         <div className="flex flex-col sm:flex-row gap-4 justify-center">
           <Link
-            to={`/programs/${DEFAULT_PROGRAM_ID}`}
+            to="/programs"
             className="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 shadow-sm"
           >
-            Go to Program Dashboard
+            Browse All Programs
           </Link>
           <Link
-            to={`/programs/${DEFAULT_PROGRAM_ID}/artifacts`}
+            to={`/programs/${DEFAULT_PROGRAM_ID}`}
             className="inline-flex items-center px-6 py-3 border border-gray-300 text-base font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 shadow-sm"
           >
-            Go to Artifacts
+            Go to Demo Program
           </Link>
         </div>
 

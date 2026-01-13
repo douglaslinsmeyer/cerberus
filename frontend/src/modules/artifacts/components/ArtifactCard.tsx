@@ -32,8 +32,8 @@ export function ArtifactCard({ artifact, programId }: ArtifactCardProps) {
       to={`/programs/${programId}/artifacts/${artifact.artifact_id}`}
       className="block bg-white rounded-lg shadow hover:shadow-md transition-shadow duration-200 p-6"
     >
-      <div className="flex items-start justify-between">
-        <div className="flex items-start space-x-3 flex-1">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start space-x-3 flex-1 min-w-0">
           <DocumentTextIcon className="h-6 w-6 text-gray-400 flex-shrink-0 mt-1" />
 
           <div className="flex-1 min-w-0">

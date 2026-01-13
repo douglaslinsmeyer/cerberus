@@ -11,6 +11,7 @@ import (
 
 	"github.com/cerberus/backend/internal/modules/artifacts"
 	"github.com/cerberus/backend/internal/modules/financial"
+	"github.com/cerberus/backend/internal/modules/programs"
 	"github.com/cerberus/backend/internal/platform/ai"
 	"github.com/cerberus/backend/internal/platform/db"
 	"github.com/cerberus/backend/internal/platform/events"
@@ -83,6 +84,11 @@ func main() {
 	financialRepo := financial.NewRepository(database)
 	invoiceAnalyzer := financial.NewInvoiceAnalyzer(claudeClient, financialRepo)
 
+	// Create program context builder
+	configService := programs.NewConfigService(database)
+	stakeholderRepo := programs.NewStakeholderRepository(database)
+	contextBuilder := ai.NewContextBuilder(configService, stakeholderRepo)
+
 	// Create event bus
 	eventBus, err := events.NewNATSBus(natsURL)
 	if err != nil {
@@ -114,10 +120,8 @@ func main() {
 		}
 
 		// Create program context (simplified for now)
-		programContext := &ai.ProgramContext{
-			ProgramName: "Default Program", // TODO: Load from database
-			ProgramCode: "DEFAULT",
-		}
+		// Build program context from database
+		programContext := contextBuilder.BuildContextOrDefault(ctx, artifact.ProgramID)
 
 		// Process artifact with AI analysis
 		if err := aiAnalyzer.ProcessArtifact(ctx, artifact, programContext); err != nil {

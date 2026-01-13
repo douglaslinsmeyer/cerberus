@@ -6,6 +6,7 @@ import (
 
 	"github.com/cerberus/backend/internal/modules/artifacts"
 	"github.com/cerberus/backend/internal/modules/financial"
+	"github.com/cerberus/backend/internal/modules/programs"
 	"github.com/cerberus/backend/internal/modules/risk"
 	"github.com/cerberus/backend/internal/platform/db"
 	"github.com/cerberus/backend/internal/platform/storage"
@@ -42,6 +43,12 @@ func NewRouter(database *db.DB) chi.Router {
 	riskService := risk.NewService(riskRepo)
 	conversationService := risk.NewConversationService(riskRepo)
 
+	// Initialize programs module
+	programsRepo := programs.NewRepository(database)
+	programsService := programs.NewService(programsRepo)
+	configService := programs.NewConfigService(database)
+	stakeholderRepo := programs.NewStakeholderRepository(database)
+
 	// Auth routes (public)
 	r.Route("/auth", func(r chi.Router) {
 		r.Post("/register", handleRegister(database))
@@ -58,19 +65,12 @@ func NewRouter(database *db.DB) chi.Router {
 	// Risk routes (Phase 3: no auth required yet)
 	risk.RegisterRoutes(r, riskService, conversationService)
 
-	// Protected routes (require authentication) - Phase 4
-	// r.Group(func(r chi.Router) {
-	// 	r.Use(authMiddleware)
+	// Programs configuration routes (no auth required yet)
+	programs.RegisterConfigRoutes(r, configService)
+	programs.RegisterStakeholderRoutes(r, stakeholderRepo)
 
-	// 	// Programs
-	// 	r.Route("/programs", func(r chi.Router) {
-	// 		r.Get("/", handleListPrograms(database))
-	// 		r.Post("/", handleCreateProgram(database))
-	// 		r.Get("/{programId}", handleGetProgram(database))
-	// 		r.Patch("/{programId}", handleUpdateProgram(database))
-	// 		r.Delete("/{programId}", handleDeleteProgram(database))
-	// 	})
-	// })
+	// Programs CRUD routes (Phase 4 - no auth required yet)
+	programs.RegisterRoutes(r, programsService)
 
 	return r
 }

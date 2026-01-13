@@ -101,11 +101,20 @@ Be thorough but concise. Provide confidence scores (0.0-1.0) for all extractions
 
 		UserPromptTmpl: `Program Context:
 - Program: {{.ProgramName}}
+{{if .CompanyName}}- Company: {{.CompanyName}}{{end}}
 {{if .CustomTaxonomy}}- Taxonomy: {{.CustomTaxonomy}}{{end}}
 {{if .KeyStakeholders}}- Key Stakeholders: {{.KeyStakeholders}}{{end}}
+{{if .KnownVendors}}- Known Vendors: {{.KnownVendors}}{{end}}
 {{if .ActiveRisks}}- Active Risks: {{.ActiveRisks}}{{end}}
 
 Task: Analyze this artifact and extract structured metadata.
+
+IMPORTANT Classification Instructions:
+- When classifying vendor names, check against the Known Vendors list above
+- Use exact vendor names from the Known Vendors list when they match
+- For invoices, use the exact legal entity name from the invoice (e.g., "Infor (US), LLC")
+- Extract person names exactly as they appear in documents
+- Match person names to Key Stakeholders when possible for auto-linking
 
 Output as JSON matching this exact schema:
 {
@@ -167,8 +176,10 @@ Artifact Content:
 type ProgramContext struct {
 	ProgramName     string
 	ProgramCode     string
+	CompanyName     string
 	CustomTaxonomy  string
 	KeyStakeholders string
+	KnownVendors    string
 	ActiveRisks     string
 	BudgetStatus    string
 	HealthScore     int
@@ -183,6 +194,14 @@ func (pc *ProgramContext) ToPromptString() string {
 		buf.WriteString(fmt.Sprintf(" (%s)", pc.ProgramCode))
 	}
 	buf.WriteString("\n")
+
+	if pc.CompanyName != "" {
+		buf.WriteString(fmt.Sprintf("Company: %s\n", pc.CompanyName))
+	}
+
+	if pc.KnownVendors != "" {
+		buf.WriteString(fmt.Sprintf("Known Vendors: %s\n", pc.KnownVendors))
+	}
 
 	if pc.HealthScore > 0 {
 		buf.WriteString(fmt.Sprintf("Health Score: %d\n", pc.HealthScore))
