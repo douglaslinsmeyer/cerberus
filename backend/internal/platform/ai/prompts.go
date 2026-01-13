@@ -107,8 +107,9 @@ Be thorough but concise. Provide confidence scores (0.0-1.0) for all extractions
 Task: Analyze this artifact and extract structured metadata.
 
 IMPORTANT Classification Instructions:
-{{if .CompanyName}}- When extracting people, if their organization matches or contains "{{.CompanyName}}", classify them as INTERNAL
-- If their organization is different from "{{.CompanyName}}", classify them as EXTERNAL
+{{if .CompanyName}}- Internal Organization(s): {{.CompanyName}}
+- When extracting people, if their organization matches or contains ANY of the Internal Organizations above, classify them as INTERNAL
+- If their organization doesn't match any Internal Organizations, classify them as EXTERNAL
 {{end}}- For invoices, extract the exact legal entity name from the invoice (e.g., "Infor (US), LLC")
 - Extract person names and organizations exactly as they appear in documents
 

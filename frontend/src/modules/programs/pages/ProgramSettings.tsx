@@ -75,7 +75,7 @@ export function ProgramSettings() {
 
           <div className="max-w-2xl">
             <label className="block text-sm font-medium text-gray-700 mb-3">
-              Internal Organization Name
+              Internal Organization Name(s)
               <span className="ml-2 text-xs text-gray-500">(Who are "we"?)</span>
             </label>
             <input
@@ -83,13 +83,16 @@ export function ProgramSettings() {
               value={internalOrganization}
               onChange={(e) => setInternalOrganization(e.target.value)}
               className="block w-full text-lg rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 px-4 py-3"
-              placeholder="e.g., PING, Acme Corp, Microsoft"
+              placeholder="e.g., PING, Ping Identity, PING Inc"
             />
+            <p className="mt-2 text-xs text-gray-500 font-medium">
+              💡 Tip: Include common variations separated by commas (e.g., "PING, Ping Identity, PING Incorporated")
+            </p>
             <p className="mt-3 text-sm text-gray-600">
               This is the name of YOUR organization. AI uses it to automatically classify people:
             </p>
             <ul className="mt-2 space-y-1 text-sm text-gray-600 ml-4">
-              <li>• If someone's organization matches this → <span className="font-medium text-blue-600">Internal</span></li>
+              <li>• If someone's organization matches <strong>ANY of these names</strong> → <span className="font-medium text-blue-600">Internal</span></li>
               <li>• If someone's organization is different → <span className="font-medium text-gray-600">External</span></li>
             </ul>
 

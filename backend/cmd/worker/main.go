@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"github.com/cerberus/backend/internal/modules/artifacts"
 	"github.com/cerberus/backend/internal/modules/financial"
 	"github.com/cerberus/backend/internal/modules/programs"
+	"github.com/cerberus/backend/internal/modules/risk"
 	"github.com/cerberus/backend/internal/platform/ai"
 	"github.com/cerberus/backend/internal/platform/db"
 	"github.com/cerberus/backend/internal/platform/events"
@@ -84,6 +86,10 @@ func main() {
 	financialRepo := financial.NewRepository(database)
 	invoiceAnalyzer := financial.NewInvoiceAnalyzer(claudeClient, financialRepo)
 
+	// Create risk detection services
+	riskRepo := risk.NewRepository(database)
+	riskDetector := risk.NewRiskDetector(riskRepo)
+
 	// Create program context builder
 	configService := programs.NewConfigService(database)
 	stakeholderRepo := programs.NewStakeholderRepository(database)
@@ -130,6 +136,19 @@ func main() {
 		}
 
 		log.Printf("Successfully analyzed artifact: %s (%s)", artifact.Filename, artifactID)
+
+		// Detect risks from insights (best effort - don't fail artifact processing)
+		insights, err := fetchArtifactInsights(ctx, database, artifactID, artifact.ProgramID)
+		if err != nil {
+			log.Printf("Warning: Failed to fetch insights for risk detection: %v", err)
+		} else if len(insights) > 0 {
+			log.Printf("Analyzing %d insights for risk detection...", len(insights))
+			if err := riskDetector.AnalyzeForRisks(ctx, insights); err != nil {
+				log.Printf("Warning: Risk detection failed: %v", err)
+			} else {
+				log.Printf("Risk detection completed for artifact: %s", artifactID)
+			}
+		}
 
 		// Generate embeddings if configured
 		if openaiKey != "" {
@@ -203,6 +222,19 @@ func main() {
 					if openaiKey != "" {
 						if err := embeddingsService.GenerateEmbeddings(ctx, artifact.ArtifactID); err != nil {
 							log.Printf("Failed to generate embeddings: %v", err)
+						}
+					}
+
+					// Detect risks from insights (best effort)
+					insights, err := fetchArtifactInsights(ctx, database, artifact.ArtifactID, artifact.ProgramID)
+					if err != nil {
+						log.Printf("Warning: Failed to fetch insights for risk detection: %v", err)
+					} else if len(insights) > 0 {
+						log.Printf("Analyzing %d insights for risk detection...", len(insights))
+						if err := riskDetector.AnalyzeForRisks(ctx, insights); err != nil {
+							log.Printf("Warning: Risk detection failed: %v", err)
+						} else {
+							log.Printf("Risk detection completed for artifact: %s", artifact.ArtifactID)
 						}
 					}
 
@@ -288,6 +320,115 @@ func main() {
 		}
 	}()
 
+	// Poll for aggregate risk analysis (cross-artifact pattern detection)
+	go func() {
+		ticker := time.NewTicker(30 * time.Minute)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				log.Println("Running aggregate risk analysis...")
+
+				// Query for programs with recent insights
+				query := `
+					SELECT DISTINCT ai.program_id
+					FROM artifact_insights ai
+					INNER JOIN artifacts a ON ai.artifact_id = a.artifact_id
+					WHERE ai.extracted_at >= NOW() - INTERVAL '24 hours'
+					  AND ai.is_dismissed = FALSE
+					  AND a.deleted_at IS NULL
+				`
+
+				rows, err := database.QueryContext(ctx, query)
+				if err != nil {
+					log.Printf("Failed to query programs for aggregate analysis: %v", err)
+					continue
+				}
+
+				var programIDs []uuid.UUID
+				for rows.Next() {
+					var programID uuid.UUID
+					if err := rows.Scan(&programID); err != nil {
+						log.Printf("Failed to scan program ID: %v", err)
+						continue
+					}
+					programIDs = append(programIDs, programID)
+				}
+				rows.Close()
+
+				// Analyze each program's recent insights
+				for _, programID := range programIDs {
+					log.Printf("Analyzing aggregate risks for program: %s", programID)
+
+					// Fetch insights from last 24 hours excluding those already converted to suggestions
+					insightsQuery := `
+						SELECT ai.insight_id, ai.artifact_id, ai.insight_type, ai.title,
+						       ai.description, ai.severity, ai.confidence_score
+						FROM artifact_insights ai
+						INNER JOIN artifacts a ON ai.artifact_id = a.artifact_id
+						WHERE a.program_id = $1
+						  AND ai.extracted_at >= NOW() - INTERVAL '24 hours'
+						  AND ai.is_dismissed = FALSE
+						  AND a.deleted_at IS NULL
+						  AND NOT EXISTS (
+						      SELECT 1 FROM risk_suggestions rs
+						      WHERE rs.source_insight_id = ai.insight_id
+						  )
+						ORDER BY ai.severity DESC, ai.confidence_score DESC
+						LIMIT 100
+					`
+
+					insightRows, err := database.QueryContext(ctx, insightsQuery, programID)
+					if err != nil {
+						log.Printf("Failed to query insights for program %s: %v", programID, err)
+						continue
+					}
+
+					var insights []risk.ArtifactInsight
+					for insightRows.Next() {
+						var insight risk.ArtifactInsight
+						var severity sql.NullString
+						var confidence sql.NullFloat64
+
+						err := insightRows.Scan(
+							&insight.InsightID,
+							&insight.ArtifactID,
+							&insight.InsightType,
+							&insight.Title,
+							&insight.Description,
+							&severity,
+							&confidence,
+						)
+						if err != nil {
+							log.Printf("Failed to scan insight: %v", err)
+							continue
+						}
+
+						insight.ProgramID = programID
+						insight.Severity = severity.String
+						insight.ConfidenceScore = confidence.Float64
+						insights = append(insights, insight)
+					}
+					insightRows.Close()
+
+					if len(insights) > 0 {
+						log.Printf("Found %d unprocessed insights for program %s", len(insights), programID)
+						if err := riskDetector.AnalyzeForRisks(ctx, insights); err != nil {
+							log.Printf("Failed aggregate risk analysis for program %s: %v", programID, err)
+						} else {
+							log.Printf("Completed aggregate risk analysis for program %s", programID)
+						}
+					}
+				}
+
+				log.Println("Aggregate risk analysis completed")
+			}
+		}
+	}()
+
 	log.Println("Worker started, processing artifacts and OCR...")
 
 	// Wait for interrupt signal
@@ -300,6 +441,50 @@ func main() {
 	cancel()
 	time.Sleep(2 * time.Second) // Give handlers time to finish
 	log.Println("Worker stopped gracefully")
+}
+
+// fetchArtifactInsights retrieves insights for risk analysis
+func fetchArtifactInsights(ctx context.Context, database *db.DB, artifactID, programID uuid.UUID) ([]risk.ArtifactInsight, error) {
+	query := `
+		SELECT insight_id, artifact_id, insight_type, title, description, severity, confidence_score
+		FROM artifact_insights
+		WHERE artifact_id = $1 AND is_dismissed = FALSE
+		ORDER BY extracted_at DESC
+	`
+
+	rows, err := database.QueryContext(ctx, query, artifactID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query insights: %w", err)
+	}
+	defer rows.Close()
+
+	var insights []risk.ArtifactInsight
+	for rows.Next() {
+		var insight risk.ArtifactInsight
+		var severity sql.NullString
+		var confidence sql.NullFloat64
+
+		err := rows.Scan(
+			&insight.InsightID,
+			&insight.ArtifactID,
+			&insight.InsightType,
+			&insight.Title,
+			&insight.Description,
+			&severity,
+			&confidence,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan insight: %w", err)
+		}
+
+		insight.ProgramID = programID
+		insight.Severity = severity.String
+		insight.ConfidenceScore = confidence.Float64
+
+		insights = append(insights, insight)
+	}
+
+	return insights, nil
 }
 
 func getEnv(key, fallback string) string {
