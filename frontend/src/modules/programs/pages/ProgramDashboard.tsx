@@ -41,19 +41,19 @@ export function ProgramDashboard() {
       name: 'Financial',
       icon: CurrencyDollarIcon,
       description: 'Invoice validation & spend tracking',
-      link: '#',
-      status: 'coming-soon',
+      link: `/programs/${programId}/financial`,
+      status: 'active',
       color: 'bg-green-500',
-      stats: 'Phase 3',
+      stats: 'Active',
     },
     {
       name: 'Risk & Issues',
       icon: ExclamationTriangleIcon,
       description: 'Risk identification & mitigation',
-      link: '#',
-      status: 'coming-soon',
+      link: `/programs/${programId}/risks`,
+      status: 'active',
       color: 'bg-red-500',
-      stats: 'Phase 3',
+      stats: 'Active',
     },
     {
       name: 'Communications',
@@ -188,7 +188,7 @@ export function ProgramDashboard() {
               <ChartBarIcon className="h-8 w-8 text-purple-600" />
               <div className="ml-4">
                 <p className="text-sm text-gray-500">Modules Active</p>
-                <p className="text-2xl font-semibold text-purple-600">1/10</p>
+                <p className="text-2xl font-semibold text-purple-600">3/10</p>
               </div>
             </div>
           </div>
@@ -241,14 +241,18 @@ export function ProgramDashboard() {
         </div>
 
         {/* Info Box */}
-        <div className="mt-8 bg-blue-50 border border-blue-200 rounded-lg p-6">
-          <h3 className="text-lg font-semibold text-blue-900 mb-2">Phase 2: Artifacts Module Complete</h3>
-          <p className="text-sm text-blue-700">
-            The Artifacts module is fully operational with AI-powered document analysis.
-            Upload PDFs or text files to see Claude extract topics, insights, and structured metadata.
+        <div className="mt-8 bg-green-50 border border-green-200 rounded-lg p-6">
+          <h3 className="text-lg font-semibold text-green-900 mb-2">Phase 3: Financial & Risk Modules Complete</h3>
+          <p className="text-sm text-green-700">
+            Three core modules are now fully operational:
           </p>
-          <p className="mt-2 text-sm text-blue-700">
-            Remaining modules (Financial, Risk, Communications, etc.) will be implemented in Phase 3-7.
+          <ul className="mt-2 space-y-1 text-sm text-green-700">
+            <li>• <strong>Artifacts</strong>: AI-powered document analysis with semantic search</li>
+            <li>• <strong>Financial</strong>: Invoice validation, variance detection, and budget tracking</li>
+            <li>• <strong>Risk & Issues</strong>: AI risk identification with mitigation planning</li>
+          </ul>
+          <p className="mt-3 text-sm text-green-700">
+            Remaining modules (Communications, Stakeholders, Decisions, etc.) will be implemented in Phase 4-7.
           </p>
         </div>
       </div>

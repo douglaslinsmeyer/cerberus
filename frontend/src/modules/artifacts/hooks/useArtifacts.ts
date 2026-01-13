@@ -25,8 +25,9 @@ export function useArtifactMetadata(programId: string, artifactId: string) {
     queryKey: ['artifact', programId, artifactId, 'metadata'],
     queryFn: () => artifactsApi.getMetadata(programId, artifactId),
     enabled: !!programId && !!artifactId,
-    refetchInterval: (data) => {
+    refetchInterval: (query) => {
       // Auto-refresh if processing
+      const data = query.state.data
       if (data?.processing_status === 'pending' || data?.processing_status === 'processing') {
         return 3000 // Poll every 3 seconds
       }
