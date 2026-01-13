@@ -25,7 +25,9 @@ func NewConfigService(database *db.DB) *ConfigService {
 func (s *ConfigService) GetProgram(ctx context.Context, programID uuid.UUID) (*Program, error) {
 	query := `
 		SELECT program_id, program_name, program_code, description,
-		       start_date, end_date, status, configuration,
+		       start_date, end_date, status,
+		       COALESCE(internal_organization, program_name) as internal_organization,
+		       configuration,
 		       created_at, created_by, updated_at, updated_by, deleted_at
 		FROM programs
 		WHERE program_id = $1 AND deleted_at IS NULL
@@ -42,6 +44,7 @@ func (s *ConfigService) GetProgram(ctx context.Context, programID uuid.UUID) (*P
 		&p.StartDate,
 		&p.EndDate,
 		&p.Status,
+		&p.InternalOrganization,
 		&configJSON,
 		&p.CreatedAt,
 		&p.CreatedBy,

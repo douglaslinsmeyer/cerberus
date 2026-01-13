@@ -101,20 +101,16 @@ Be thorough but concise. Provide confidence scores (0.0-1.0) for all extractions
 
 		UserPromptTmpl: `Program Context:
 - Program: {{.ProgramName}}
-{{if .CompanyName}}- Company: {{.CompanyName}}{{end}}
-{{if .CustomTaxonomy}}- Taxonomy: {{.CustomTaxonomy}}{{end}}
-{{if .KeyStakeholders}}- Key Stakeholders: {{.KeyStakeholders}}{{end}}
-{{if .KnownVendors}}- Known Vendors: {{.KnownVendors}}{{end}}
+{{if .CompanyName}}- Internal Organization: {{.CompanyName}}{{end}}
 {{if .ActiveRisks}}- Active Risks: {{.ActiveRisks}}{{end}}
 
 Task: Analyze this artifact and extract structured metadata.
 
 IMPORTANT Classification Instructions:
-- When classifying vendor names, check against the Known Vendors list above
-- Use exact vendor names from the Known Vendors list when they match
-- For invoices, use the exact legal entity name from the invoice (e.g., "Infor (US), LLC")
-- Extract person names exactly as they appear in documents
-- Match person names to Key Stakeholders when possible for auto-linking
+{{if .CompanyName}}- When extracting people, if their organization matches or contains "{{.CompanyName}}", classify them as INTERNAL
+- If their organization is different from "{{.CompanyName}}", classify them as EXTERNAL
+{{end}}- For invoices, extract the exact legal entity name from the invoice (e.g., "Infor (US), LLC")
+- Extract person names and organizations exactly as they appear in documents
 
 Output as JSON matching this exact schema:
 {

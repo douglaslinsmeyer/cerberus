@@ -22,9 +22,10 @@ func NewRepository(database *db.DB) *Repository {
 // ListProgramsWithStats retrieves all programs with aggregated statistics
 func (r *Repository) ListProgramsWithStats(ctx context.Context) ([]ProgramWithStats, error) {
 	query := `
-		SELECT 
+		SELECT
 			p.program_id, p.program_name, p.program_code, p.description,
 			p.start_date, p.end_date, p.status,
+			COALESCE(p.internal_organization, p.program_name) as internal_organization,
 			p.created_at, p.created_by, p.updated_at, p.updated_by,
 			COALESCE(a.count, 0) as artifact_count,
 			COALESCE(i.count, 0) as invoice_count,
@@ -64,6 +65,7 @@ func (r *Repository) ListProgramsWithStats(ctx context.Context) ([]ProgramWithSt
 		err := rows.Scan(
 			&p.ProgramID, &p.ProgramName, &p.ProgramCode, &p.Description,
 			&p.StartDate, &p.EndDate, &p.Status,
+			&p.InternalOrganization,
 			&p.CreatedAt, &p.CreatedBy, &p.UpdatedAt, &p.UpdatedBy,
 			&p.ArtifactCount, &p.InvoiceCount, &p.RiskCount,
 		)
@@ -83,9 +85,10 @@ func (r *Repository) ListProgramsWithStats(ctx context.Context) ([]ProgramWithSt
 // GetProgramByID retrieves a single program by ID with statistics
 func (r *Repository) GetProgramByID(ctx context.Context, programID uuid.UUID) (*ProgramWithStats, error) {
 	query := `
-		SELECT 
+		SELECT
 			p.program_id, p.program_name, p.program_code, p.description,
 			p.start_date, p.end_date, p.status,
+			COALESCE(p.internal_organization, p.program_name) as internal_organization,
 			p.created_at, p.created_by, p.updated_at, p.updated_by,
 			COALESCE(a.count, 0) as artifact_count,
 			COALESCE(i.count, 0) as invoice_count,
@@ -116,6 +119,7 @@ func (r *Repository) GetProgramByID(ctx context.Context, programID uuid.UUID) (*
 	err := r.db.QueryRowContext(ctx, query, programID).Scan(
 		&p.ProgramID, &p.ProgramName, &p.ProgramCode, &p.Description,
 		&p.StartDate, &p.EndDate, &p.Status,
+		&p.InternalOrganization,
 		&p.CreatedAt, &p.CreatedBy, &p.UpdatedAt, &p.UpdatedBy,
 		&p.ArtifactCount, &p.InvoiceCount, &p.RiskCount,
 	)
@@ -156,20 +160,22 @@ func (r *Repository) CreateProgram(ctx context.Context, program *Program) error 
 func (r *Repository) UpdateProgram(ctx context.Context, program *Program) error {
 	query := `
 		UPDATE programs
-		SET 
+		SET
 			program_name = COALESCE($2, program_name),
 			description = COALESCE($3, description),
 			start_date = COALESCE($4, start_date),
 			end_date = COALESCE($5, end_date),
 			status = COALESCE($6, status),
-			updated_at = $7,
-			updated_by = $8
+			internal_organization = COALESCE($7, internal_organization),
+			updated_at = $8,
+			updated_by = $9
 		WHERE program_id = $1 AND deleted_at IS NULL
 	`
 
 	result, err := r.db.ExecContext(ctx, query,
 		program.ProgramID, program.ProgramName, program.Description,
 		program.StartDate, program.EndDate, program.Status,
+		program.InternalOrganization,
 		program.UpdatedAt, program.UpdatedBy,
 	)
 

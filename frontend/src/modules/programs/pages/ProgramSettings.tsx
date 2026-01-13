@@ -1,39 +1,39 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeftIcon, BuildingOfficeIcon, UserGroupIcon, TagIcon } from '@heroicons/react/24/outline'
+import { ArrowLeftIcon } from '@heroicons/react/24/outline'
 
 export function ProgramSettings() {
   const { programId } = useParams<{ programId: string }>()
-  const [activeTab, setActiveTab] = useState<'company' | 'stakeholders' | 'vendors' | 'taxonomy'>('company')
+  const [internalOrganization, setInternalOrganization] = useState('PING')
+  const [isSaving, setIsSaving] = useState(false)
 
-  const [companyName, setCompanyName] = useState('PING, Inc.')
-  const [legalName, setLegalName] = useState('PING Incorporated')
-  const [aliases, setAliases] = useState('PING, Ping Identity')
+  // Load current value from API
+  useEffect(() => {
+    fetch(`http://localhost:8080/api/v1/programs/${programId}`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.data?.internal_organization) {
+          setInternalOrganization(data.data.internal_organization)
+        }
+      })
+      .catch(err => console.error('Failed to load program:', err))
+  }, [programId])
 
-  const [stakeholders, setStakeholders] = useState([
-    { name: 'John Smith', role: 'Program Director', type: 'internal', engagement: 'key' },
-    { name: 'Sarah Chen', role: 'Finance Lead', type: 'internal', engagement: 'primary' },
-  ])
-
-  const [vendors, setVendors] = useState([
-    { name: 'Infor (US), LLC', type: 'software_vendor' },
-    { name: 'Microsoft', type: 'cloud_provider' },
-  ])
-
-  const [riskCategories, setRiskCategories] = useState('vendor, security, compliance, technical, financial')
-  const [spendCategories, setSpendCategories] = useState('software, consulting, infrastructure, support, labor')
-
-  const handleSave = () => {
-    // TODO: Save to API
-    alert('Configuration saved! (API integration pending)')
+  const handleSave = async () => {
+    setIsSaving(true)
+    try {
+      await fetch(`http://localhost:8080/api/v1/programs/${programId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ internal_organization: internalOrganization })
+      })
+      alert('Settings saved! AI will now use "' + internalOrganization + '" to classify internal vs external people.')
+    } catch (err) {
+      alert('Failed to save: ' + err)
+    } finally {
+      setIsSaving(false)
+    }
   }
-
-  const tabs = [
-    { id: 'company', name: 'Company Info', icon: BuildingOfficeIcon },
-    { id: 'stakeholders', name: 'Stakeholders', icon: UserGroupIcon },
-    { id: 'vendors', name: 'Vendors', icon: TagIcon },
-    { id: 'taxonomy', name: 'Taxonomy', icon: TagIcon },
-  ]
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -56,213 +56,79 @@ export function ProgramSettings() {
 
             <button
               onClick={handleSave}
-              className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
+              disabled={isSaving}
+              className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50"
             >
-              Save Changes
+              {isSaving ? 'Saving...' : 'Save Settings'}
             </button>
           </div>
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Tabs */}
-        <div className="border-b border-gray-200 mb-6">
-          <nav className="-mb-px flex space-x-8">
-            {tabs.map((tab) => {
-              const Icon = tab.icon
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id as any)}
-                  className={`
-                    flex items-center py-4 px-1 border-b-2 font-medium text-sm
-                    ${activeTab === tab.id
-                      ? 'border-blue-500 text-blue-600'
-                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                    }
-                  `}
-                >
-                  <Icon className="h-5 w-5 mr-2" />
-                  {tab.name}
-                </button>
-              )
-            })}
-          </nav>
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Simple Single-Field Configuration */}
+        <div className="bg-white rounded-lg shadow p-8">
+          <h2 className="text-2xl font-semibold text-gray-900 mb-2">AI Context Configuration</h2>
+          <p className="text-sm text-gray-600 mb-8">
+            Configure the minimal information AI needs to provide intelligent, context-aware analysis.
+          </p>
+
+          <div className="max-w-2xl">
+            <label className="block text-sm font-medium text-gray-700 mb-3">
+              Internal Organization Name
+              <span className="ml-2 text-xs text-gray-500">(Who are "we"?)</span>
+            </label>
+            <input
+              type="text"
+              value={internalOrganization}
+              onChange={(e) => setInternalOrganization(e.target.value)}
+              className="block w-full text-lg rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 px-4 py-3"
+              placeholder="e.g., PING, Acme Corp, Microsoft"
+            />
+            <p className="mt-3 text-sm text-gray-600">
+              This is the name of YOUR organization. AI uses it to automatically classify people:
+            </p>
+            <ul className="mt-2 space-y-1 text-sm text-gray-600 ml-4">
+              <li>• If someone's organization matches this → <span className="font-medium text-blue-600">Internal</span></li>
+              <li>• If someone's organization is different → <span className="font-medium text-gray-600">External</span></li>
+            </ul>
+
+            <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded-lg">
+              <h3 className="text-sm font-medium text-green-800 mb-2">✨ Everything Else is Automatic</h3>
+              <p className="text-xs text-green-700">
+                <strong>Stakeholders</strong> emerge from uploaded documents (emails, meeting notes, contracts).
+                <br />
+                <strong>Vendors</strong> emerge from invoices and financial documents.
+                <br />
+                <strong>Taxonomy</strong> is inferred by AI from your documents.
+                <br /><br />
+                No manual list maintenance required! Just set your organization name and upload documents.
+              </p>
+            </div>
+          </div>
         </div>
 
-        {/* Company Info Tab */}
-        {activeTab === 'company' && (
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Company Information</h2>
-            <p className="text-sm text-gray-600 mb-6">
-              Configure your organization name so AI can distinguish internal vs external people.
-            </p>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Company Name
-                </label>
-                <input
-                  type="text"
-                  value={companyName}
-                  onChange={(e) => setCompanyName(e.target.value)}
-                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  placeholder="e.g., PING, Inc."
-                />
-                <p className="mt-1 text-xs text-gray-500">
-                  Primary company name used in documents
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Full Legal Name
-                </label>
-                <input
-                  type="text"
-                  value={legalName}
-                  onChange={(e) => setLegalName(e.target.value)}
-                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  placeholder="e.g., PING Incorporated"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Aliases (comma-separated)
-                </label>
-                <input
-                  type="text"
-                  value={aliases}
-                  onChange={(e) => setAliases(e.target.value)}
-                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  placeholder="e.g., PING, Ping Identity, PING Inc"
-                />
-                <p className="mt-1 text-xs text-gray-500">
-                  Other names your company might be referred to as
-                </p>
-              </div>
+        {/* How It Works */}
+        <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-6">
+          <h3 className="text-sm font-semibold text-blue-900 mb-3">How This Works</h3>
+          <div className="space-y-3 text-sm text-blue-800">
+            <div className="flex">
+              <span className="font-bold mr-2">1.</span>
+              <span>You upload an invoice from vendor "Infor (US), LLC"</span>
+            </div>
+            <div className="flex">
+              <span className="font-bold mr-2">2.</span>
+              <span>AI extracts person "Bob Teicher" working at "Infor (US), LLC"</span>
+            </div>
+            <div className="flex">
+              <span className="font-bold mr-2">3.</span>
+              <span>AI compares: "Infor (US), LLC" ≠ "{internalOrganization}" → Classifies as <strong>External</strong></span>
+            </div>
+            <div className="flex">
+              <span className="font-bold mr-2">4.</span>
+              <span>Invoice appears in Financial module with vendor properly identified</span>
             </div>
           </div>
-        )}
-
-        {/* Stakeholders Tab */}
-        {activeTab === 'stakeholders' && (
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Internal Stakeholders</h2>
-            <p className="text-sm text-gray-600 mb-6">
-              Define key internal people so AI can recognize them in documents.
-            </p>
-
-            <div className="overflow-hidden">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Role</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Engagement</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {stakeholders.map((stakeholder, idx) => (
-                    <tr key={idx}>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                        {stakeholder.name}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {stakeholder.role}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800">
-                          {stakeholder.type}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {stakeholder.engagement}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <button className="mt-4 text-sm text-blue-600 hover:text-blue-700">
-              + Add Stakeholder
-            </button>
-          </div>
-        )}
-
-        {/* Vendors Tab */}
-        {activeTab === 'vendors' && (
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Known Vendors</h2>
-            <p className="text-sm text-gray-600 mb-6">
-              Define external vendors so AI can recognize them in invoices and contracts.
-            </p>
-
-            <div className="space-y-2">
-              {vendors.map((vendor, idx) => (
-                <div key={idx} className="flex items-center justify-between p-3 border rounded-lg">
-                  <div>
-                    <p className="text-sm font-medium text-gray-900">{vendor.name}</p>
-                    <p className="text-xs text-gray-500">{vendor.type}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <button className="mt-4 text-sm text-blue-600 hover:text-blue-700">
-              + Add Vendor
-            </button>
-          </div>
-        )}
-
-        {/* Taxonomy Tab */}
-        {activeTab === 'taxonomy' && (
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Custom Taxonomy</h2>
-            <p className="text-sm text-gray-600 mb-6">
-              Define program-specific categories for AI classification.
-            </p>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Risk Categories
-                </label>
-                <input
-                  type="text"
-                  value={riskCategories}
-                  onChange={(e) => setRiskCategories(e.target.value)}
-                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  placeholder="Comma-separated categories"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Spend Categories
-                </label>
-                <input
-                  type="text"
-                  value={spendCategories}
-                  onChange={(e) => setSpendCategories(e.target.value)}
-                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  placeholder="Comma-separated categories"
-                />
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Info Box */}
-        <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <p className="text-sm text-blue-700">
-            <strong>AI Context:</strong> This configuration is used by Claude AI to provide program-specific analysis.
-            Company info helps distinguish internal vs external people. Taxonomy ensures consistent categorization.
-          </p>
         </div>
       </div>
     </div>

@@ -27,39 +27,21 @@ func NewContextBuilder(
 }
 
 // BuildContext assembles complete program context from database
+// SIMPLIFIED: Just loads internal organization name - that's all AI needs!
 func (cb *ContextBuilder) BuildContext(ctx context.Context, programID uuid.UUID) (*ProgramContext, error) {
-	// Get program with configuration
+	// Get program basic info + internal organization
 	program, err := cb.configService.GetProgram(ctx, programID)
 	if err != nil {
-		// Fallback to default context if program not found
 		return cb.getDefaultContext(programID), fmt.Errorf("failed to load program, using defaults: %w", err)
 	}
 
-	// Get internal stakeholders
-	internalStakeholders, err := cb.stakeholderRepository.ListInternal(ctx, programID)
-	if err != nil {
-		// Log error but continue with empty stakeholder list
-		internalStakeholders = []programs.Stakeholder{}
-	}
-
-	// Get external stakeholders
-	externalStakeholders, err := cb.stakeholderRepository.ListExternal(ctx, programID)
-	if err != nil {
-		// Log error but continue with empty stakeholder list
-		externalStakeholders = []programs.Stakeholder{}
-	}
-
-	// Format context
+	// Build simple context - just program name and internal organization
+	// AI will automatically classify people based on whether their org matches CompanyName
 	programContext := &ProgramContext{
-		ProgramName:     program.ProgramName,
-		ProgramCode:     program.ProgramCode,
-		CompanyName:     program.Configuration.Company.Name,
-		CustomTaxonomy:  cb.formatTaxonomy(&program.Configuration),
-		KeyStakeholders: cb.formatStakeholders(internalStakeholders, externalStakeholders),
-		KnownVendors:    cb.formatVendors(&program.Configuration),
-		HealthScore:     0, // TODO: Integrate with health score calculation when available
-		BudgetStatus:    "", // TODO: Integrate with budget status when available
-		ActiveRisks:     "", // TODO: Integrate with risk module when available
+		ProgramName: program.ProgramName,
+		ProgramCode: program.ProgramCode,
+		CompanyName: program.InternalOrganization, // This is all we need!
+		HealthScore: 0,
 	}
 
 	return programContext, nil

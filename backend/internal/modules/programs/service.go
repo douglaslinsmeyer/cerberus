@@ -157,6 +157,10 @@ func (s *Service) UpdateProgram(ctx context.Context, programID uuid.UUID, req Up
 		program.Status = *req.Status
 	}
 
+	if req.InternalOrganization != nil && *req.InternalOrganization != "" {
+		program.InternalOrganization = strings.TrimSpace(*req.InternalOrganization)
+	}
+
 	return s.repo.UpdateProgram(ctx, program)
 }
 
