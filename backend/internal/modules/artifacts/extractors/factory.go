@@ -16,7 +16,8 @@ func NewExtractorFactory() *ExtractorFactory {
 		extractors: []ContentExtractor{
 			NewPDFExtractor(),
 			NewTextExtractor(),
-			// Future: Add DOCX, XLSX, Image extractors
+			NewExcelExtractor(),
+			// Future: Add DOCX, Image extractors
 		},
 	}
 }

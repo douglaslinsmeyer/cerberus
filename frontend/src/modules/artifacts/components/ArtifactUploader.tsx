@@ -58,6 +58,8 @@ export function ArtifactUploader({ programId, onUploadSuccess }: ArtifactUploade
       'text/markdown': ['.md'],
       'text/csv': ['.csv'],
       'application/json': ['.json'],
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+      'application/vnd.ms-excel': ['.xls'],
     },
     maxSize: 50 * 1024 * 1024, // 50MB
   })
@@ -91,7 +93,7 @@ export function ArtifactUploader({ programId, onUploadSuccess }: ArtifactUploade
         </p>
 
         <p className="mt-1 text-xs text-gray-500">
-          PDF or text files up to 50MB
+          PDF, Excel, or text files up to 50MB
         </p>
       </div>
 
