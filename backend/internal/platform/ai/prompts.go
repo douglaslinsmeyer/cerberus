@@ -86,15 +86,16 @@ func (lib *PromptLibrary) registerArtifactAnalysisPrompt() {
 Your role is to analyze uploaded artifacts and extract structured metadata to build program knowledge.
 
 Extract with high accuracy:
-1. Executive summary (2-3 sentences maximum)
-2. Key topics/themes from the document
-3. People mentioned (names, roles, organizations, context)
-4. Important facts (dates, amounts, metrics, commitments, deadlines)
-5. Decisions or action items
-6. Risk indicators or concerns
-7. Financial data (budgets, costs, invoices)
-8. Sentiment (positive, neutral, concern, negative)
-9. Priority level (1-5, where 5 is most critical)
+1. Document type classification (invoice, contract, meeting notes, report, email, memo, etc.)
+2. Executive summary (2-3 sentences maximum)
+3. Key topics/themes from the document
+4. People mentioned (names, roles, organizations, context)
+5. Important facts (dates, amounts, metrics, commitments, deadlines)
+6. Decisions or action items
+7. Risk indicators or concerns
+8. Financial data (budgets, costs, invoices)
+9. Sentiment (positive, neutral, concern, negative)
+10. Priority level (1-5, where 5 is most critical)
 
 Be thorough but concise. Provide confidence scores (0.0-1.0) for all extractions where you're uncertain.`,
 
@@ -108,6 +109,8 @@ Task: Analyze this artifact and extract structured metadata.
 
 Output as JSON matching this exact schema:
 {
+  "document_type": "invoice",
+  "document_type_confidence": 0.98,
   "summary": "2-3 sentence executive summary",
   "key_topics": [
     {"topic": "budget", "confidence": 0.95},

@@ -122,11 +122,10 @@ IMPORTANT:
 Return only the JSON, no explanation.`, artifactContent)
 
 	// Call Claude API
-	resp, err := a.client.RequestWithContext(
+	resp, err := a.client.SimpleRequest(
 		ctx,
 		ai.ModelSonnet4,
 		systemPrompt,
-		"", // No static context for invoice extraction
 		userPrompt,
 		4096,
 	)

@@ -30,20 +30,24 @@ func NewAIAnalyzer(client *ai.Client, repo RepositoryInterface) *AIAnalyzer {
 
 // AnalysisResult contains all extracted metadata from AI analysis
 type AnalysisResult struct {
-	Summary         ArtifactSummary
-	Topics          []Topic
-	Persons         []Person
-	Facts           []Fact
-	Insights        []Insight
-	ProcessingTime  time.Duration
-	TokensUsed      int
-	Cost            float64
+	DocumentType           string
+	DocumentTypeConfidence float64
+	Summary                ArtifactSummary
+	Topics                 []Topic
+	Persons                []Person
+	Facts                  []Fact
+	Insights               []Insight
+	ProcessingTime         time.Duration
+	TokensUsed             int
+	Cost                   float64
 }
 
 // AIExtractionResponse matches the JSON schema from the prompt
 type AIExtractionResponse struct {
-	Summary          string `json:"summary"`
-	KeyTopics        []struct {
+	DocumentType           string  `json:"document_type"`
+	DocumentTypeConfidence float64 `json:"document_type_confidence"`
+	Summary                string  `json:"summary"`
+	KeyTopics              []struct {
 		Topic      string  `json:"topic"`
 		Confidence float64 `json:"confidence"`
 	} `json:"key_topics"`
@@ -131,9 +135,11 @@ func (a *AIAnalyzer) AnalyzeArtifact(ctx context.Context, artifact *Artifact, pr
 
 	// Convert to domain models
 	result := &AnalysisResult{
-		ProcessingTime: time.Since(startTime),
-		TokensUsed:     resp.Usage.InputTokens + resp.Usage.OutputTokens,
-		Cost:           ai.NewCostCalculator().CalculateCost(resp.Model, &resp.Usage),
+		DocumentType:           extraction.DocumentType,
+		DocumentTypeConfidence: extraction.DocumentTypeConfidence,
+		ProcessingTime:         time.Since(startTime),
+		TokensUsed:             resp.Usage.InputTokens + resp.Usage.OutputTokens,
+		Cost:                   ai.NewCostCalculator().CalculateCost(resp.Model, &resp.Usage),
 	}
 
 	// Convert summary
@@ -249,6 +255,19 @@ func (a *AIAnalyzer) StoreAnalysisResults(ctx context.Context, artifactID uuid.U
 	// Save insights
 	if err := a.repo.SaveInsights(ctx, result.Insights); err != nil {
 		return fmt.Errorf("failed to save insights: %w", err)
+	}
+
+	// Update artifact category with document type
+	if result.DocumentType != "" {
+		query := `
+			UPDATE artifacts
+			SET artifact_category = $1
+			WHERE artifact_id = $2
+		`
+		_, err := a.repo.ExecContext(ctx, query, result.DocumentType, artifactID)
+		if err != nil {
+			return fmt.Errorf("failed to update artifact category: %w", err)
+		}
 	}
 
 	// Update artifact status to completed

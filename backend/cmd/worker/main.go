@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/cerberus/backend/internal/modules/artifacts"
+	"github.com/cerberus/backend/internal/modules/financial"
 	"github.com/cerberus/backend/internal/platform/ai"
 	"github.com/cerberus/backend/internal/platform/db"
 	"github.com/cerberus/backend/internal/platform/events"
@@ -77,6 +78,10 @@ func main() {
 	aiAnalyzer := artifacts.NewAIAnalyzer(claudeClient, artifactsRepo)
 	embeddingsService := artifacts.NewEmbeddingsService(openaiKey, artifactsRepo)
 	ocrService := artifacts.NewOCRService(artifactsRepo, storageClient)
+
+	// Create financial module services
+	financialRepo := financial.NewRepository(database)
+	invoiceAnalyzer := financial.NewInvoiceAnalyzer(claudeClient, financialRepo)
 
 	// Create event bus
 	eventBus, err := events.NewNATSBus(natsURL)
@@ -194,6 +199,35 @@ func main() {
 					if openaiKey != "" {
 						if err := embeddingsService.GenerateEmbeddings(ctx, artifact.ArtifactID); err != nil {
 							log.Printf("Failed to generate embeddings: %v", err)
+						}
+					}
+
+					// Check if artifact is an invoice and process financially
+					updatedArtifact, err := artifactsRepo.GetByID(ctx, artifact.ArtifactID)
+					if err == nil && updatedArtifact.ArtifactCategory.Valid {
+						category := updatedArtifact.ArtifactCategory.String
+						log.Printf("Artifact %s categorized as: %s", artifact.ArtifactID, category)
+
+						if category == "invoice" && updatedArtifact.RawContent.Valid {
+							log.Printf("Processing invoice: %s", artifact.ArtifactID)
+
+							programContext := &ai.ProgramContext{
+								ProgramName: "Default Program",
+								ProgramCode: "DEFAULT",
+							}
+
+							err := invoiceAnalyzer.ProcessInvoice(
+								ctx,
+								updatedArtifact.ArtifactID,
+								updatedArtifact.RawContent.String,
+								updatedArtifact.ProgramID,
+								programContext,
+							)
+							if err != nil {
+								log.Printf("Failed to process invoice %s: %v", artifact.ArtifactID, err)
+							} else {
+								log.Printf("Invoice processed successfully: %s", artifact.ArtifactID)
+							}
 						}
 					}
 				}
