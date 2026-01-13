@@ -193,6 +193,12 @@ export interface RateCardWithItems extends RateCard {
   items?: RateCardItem[]
 }
 
+// NullTime for Go time.Time fields
+export interface NullTime {
+  Time: string
+  Valid: boolean
+}
+
 export interface Invoice {
   invoice_id: string
   program_id: string
@@ -201,9 +207,9 @@ export interface Invoice {
   vendor_name: string
   vendor_id?: NullString
   invoice_date: string
-  due_date?: NullString
-  period_start_date?: NullString
-  period_end_date?: NullString
+  due_date?: NullTime
+  period_start_date?: NullTime
+  period_end_date?: NullTime
   subtotal_amount?: NullFloat64
   tax_amount?: NullFloat64
   total_amount: number

@@ -133,18 +133,18 @@ export function InvoiceDetailPage() {
                 {invoice.due_date?.Valid && (
                   <div>
                     <dt className="text-sm font-medium text-gray-500">Due Date</dt>
-                    <dd className="mt-1 text-sm text-gray-900">{formatDate(invoice.due_date.String)}</dd>
+                    <dd className="mt-1 text-sm text-gray-900">{formatDate(invoice.due_date.Time)}</dd>
                   </div>
                 )}
                 {invoice.period_start_date?.Valid && invoice.period_end_date?.Valid && (
                   <>
                     <div>
                       <dt className="text-sm font-medium text-gray-500">Period Start</dt>
-                      <dd className="mt-1 text-sm text-gray-900">{formatDate(invoice.period_start_date.String)}</dd>
+                      <dd className="mt-1 text-sm text-gray-900">{formatDate(invoice.period_start_date.Time)}</dd>
                     </div>
                     <div>
                       <dt className="text-sm font-medium text-gray-500">Period End</dt>
-                      <dd className="mt-1 text-sm text-gray-900">{formatDate(invoice.period_end_date.String)}</dd>
+                      <dd className="mt-1 text-sm text-gray-900">{formatDate(invoice.period_end_date.Time)}</dd>
                     </div>
                   </>
                 )}
