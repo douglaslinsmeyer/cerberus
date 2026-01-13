@@ -4,17 +4,18 @@ An AI-powered strategic "cockpit" for program leaders to import, assimilate, ana
 
 ## Project Status
 
-🎉 **Phase 2: Artifacts Module (CORE)** - Complete!
+🎉 **Phase 3: Financial & Risk Modules** - Complete!
 
 Current implementation status:
-- ✅ Phase 1: Foundation infrastructure
-- ✅ Phase 2: Artifacts Module with AI-powered analysis
-- ✅ Docker Compose with 8 services operational
+- ✅ Phase 1: Foundation infrastructure (8 services, auto-migrations)
+- ✅ Phase 2: Artifacts Module with AI-powered analysis (semantic search, pgvector)
+- ✅ Phase 3: Financial & Risk modules (invoice validation, risk identification)
+- ✅ 3/10 core modules operational
 - ✅ Complete backend with Claude API integration
-- ✅ React frontend with artifact upload and visualization
-- ✅ Semantic search with pgvector
-- ✅ NATS event bus for module integration
-- ⏳ Remaining modules (financial, risk, etc.) (planned for Phase 3+)
+- ✅ React frontend with comprehensive UI (15+ pages)
+- ✅ NATS event bus connecting modules
+- ✅ JWT authentication foundation
+- ⏳ Remaining modules (communications, stakeholders, decisions, etc.) (planned for Phase 4-7)
 
 ## Architecture
 
@@ -192,16 +193,19 @@ cerberus/
 
 ## 10 Core Modules
 
-1. **Program Artifacts** ⭐ - AI-powered document analysis and metadata extraction
-2. **Financial Reporting** - Invoice validation and variance analysis
-3. **Risk & Issue Management** - Proactive risk identification
-4. **Communications** - AI-assisted communication drafting
-5. **Stakeholder Management** - Stakeholder tracking and engagement
-6. **Decision Log** - Decision capture and impact analysis
-7. **Executive Dashboard** - Health scoring and predictive alerts
-8. **Milestone & Phase Management** - Timeline and gate management
-9. **Governance Framework** - Compliance and audit tracking
-10. **Change Control Board** - Change impact analysis
+**Operational (3/10):**
+1. ✅ **Program Artifacts** ⭐ - AI-powered document analysis and metadata extraction (Phase 2)
+2. ✅ **Financial Reporting** - Invoice validation, variance analysis, budget tracking (Phase 3)
+3. ✅ **Risk & Issue Management** - Proactive risk identification with conversation threads (Phase 3)
+
+**Coming Soon (7/10):**
+4. ⏳ **Communications** - AI-assisted communication drafting (Phase 4)
+5. ⏳ **Stakeholder Management** - Stakeholder tracking and engagement (Phase 4)
+6. ⏳ **Decision Log** - Decision capture and impact analysis (Phase 5)
+7. ⏳ **Executive Dashboard** - Health scoring and predictive alerts (Phase 5)
+8. ⏳ **Milestone & Phase Management** - Timeline and gate management (Phase 6)
+9. ⏳ **Governance Framework** - Compliance and audit tracking (Phase 6)
+10. ⏳ **Change Control Board** - Change impact analysis (Phase 7)
 
 ## API Documentation
 
