@@ -163,6 +163,42 @@ func (s *Service) ListRisks(ctx context.Context, filter RiskFilterRequest) ([]Ri
 	return risks, nil
 }
 
+// ListRisksWithSuggestions retrieves both risks and pending suggestions for a program
+func (s *Service) ListRisksWithSuggestions(ctx context.Context, filter RiskFilterRequest, includeSuggestions bool) (*RiskListWithSuggestionsResponse, error) {
+	if filter.ProgramID == uuid.Nil {
+		return nil, fmt.Errorf("program_id is required")
+	}
+
+	// Validate filters
+	if filter.Status != "" && !isValidStatus(filter.Status) {
+		return nil, fmt.Errorf("invalid status: must be suggested, open, monitoring, mitigated, closed, or realized")
+	}
+	if filter.Category != "" && !isValidCategory(filter.Category) {
+		return nil, fmt.Errorf("invalid category: must be technical, financial, schedule, resource, or external")
+	}
+	if filter.Severity != "" && !isValidSeverity(filter.Severity) {
+		return nil, fmt.Errorf("invalid severity: must be low, medium, high, or critical")
+	}
+
+	// Set default pagination
+	if filter.Limit <= 0 {
+		filter.Limit = 50
+	}
+	if filter.Limit > 1000 {
+		filter.Limit = 1000
+	}
+	if filter.Offset < 0 {
+		filter.Offset = 0
+	}
+
+	response, err := s.repo.ListRisksWithSuggestions(ctx, filter, includeSuggestions)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list risks with suggestions: %w", err)
+	}
+
+	return response, nil
+}
+
 // UpdateRiskStatus updates the status of a risk
 func (s *Service) UpdateRiskStatus(ctx context.Context, riskID uuid.UUID, newStatus string) error {
 	if riskID == uuid.Nil {
@@ -454,6 +490,60 @@ func (s *Service) DismissSuggestion(ctx context.Context, req DismissSuggestionRe
 	}
 
 	return nil
+}
+
+// AcceptEnrichment marks an enrichment link as relevant for a specific risk
+func (s *Service) AcceptEnrichment(ctx context.Context, riskID uuid.UUID, enrichmentID uuid.UUID, reviewedBy uuid.UUID) error {
+	if riskID == uuid.Nil {
+		return fmt.Errorf("risk_id is required")
+	}
+	if enrichmentID == uuid.Nil {
+		return fmt.Errorf("enrichment_id is required")
+	}
+	if reviewedBy == uuid.Nil {
+		return fmt.Errorf("reviewed_by is required")
+	}
+
+	err := s.repo.UpdateEnrichmentRelevance(ctx, riskID, enrichmentID, true, reviewedBy)
+	if err != nil {
+		return fmt.Errorf("failed to accept enrichment: %w", err)
+	}
+
+	return nil
+}
+
+// RejectEnrichment marks an enrichment link as not relevant for a specific risk
+func (s *Service) RejectEnrichment(ctx context.Context, riskID uuid.UUID, enrichmentID uuid.UUID, reviewedBy uuid.UUID) error {
+	if riskID == uuid.Nil {
+		return fmt.Errorf("risk_id is required")
+	}
+	if enrichmentID == uuid.Nil {
+		return fmt.Errorf("enrichment_id is required")
+	}
+	if reviewedBy == uuid.Nil {
+		return fmt.Errorf("reviewed_by is required")
+	}
+
+	err := s.repo.UpdateEnrichmentRelevance(ctx, riskID, enrichmentID, false, reviewedBy)
+	if err != nil {
+		return fmt.Errorf("failed to reject enrichment: %w", err)
+	}
+
+	return nil
+}
+
+// GetEnrichments retrieves enrichments for a risk
+func (s *Service) GetEnrichments(ctx context.Context, riskID uuid.UUID) ([]RiskEnrichmentWithMetadata, error) {
+	if riskID == uuid.Nil {
+		return nil, fmt.Errorf("risk_id is required")
+	}
+
+	enrichments, err := s.repo.GetEnrichmentsByRisk(ctx, riskID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get enrichments: %w", err)
+	}
+
+	return enrichments, nil
 }
 
 // AddMitigation adds a mitigation action to a risk

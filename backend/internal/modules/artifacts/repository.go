@@ -128,7 +128,7 @@ func (r *Repository) ListByProgram(ctx context.Context, programID uuid.UUID, lim
 	}
 	defer rows.Close()
 
-	var artifacts []Artifact
+	artifacts := make([]Artifact, 0)
 	for rows.Next() {
 		var a Artifact
 		err := rows.Scan(
@@ -194,7 +194,7 @@ func (r *Repository) GetPendingArtifacts(ctx context.Context, limit int) ([]Arti
 	}
 	defer rows.Close()
 
-	var artifacts []Artifact
+	artifacts := make([]Artifact, 0)
 	for rows.Next() {
 		var a Artifact
 		err := rows.Scan(
@@ -287,7 +287,7 @@ func (r *Repository) GetChunks(ctx context.Context, artifactID uuid.UUID) ([]Art
 	}
 	defer rows.Close()
 
-	var chunks []ArtifactChunk
+	chunks := make([]ArtifactChunk, 0)
 	for rows.Next() {
 		var c ArtifactChunk
 		err := rows.Scan(

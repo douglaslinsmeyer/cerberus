@@ -1,3 +1,4 @@
+import { Link, useParams } from 'react-router-dom'
 import { ArtifactWithMetadata } from '@/services/api'
 import {
   DocumentTextIcon,
@@ -5,6 +6,7 @@ import {
   LightBulbIcon,
   ChartBarIcon,
   ExclamationTriangleIcon,
+  LinkIcon,
 } from '@heroicons/react/24/outline'
 
 interface MetadataViewProps {
@@ -12,6 +14,7 @@ interface MetadataViewProps {
 }
 
 export function MetadataView({ artifact }: MetadataViewProps) {
+  const { programId } = useParams<{ programId: string }>()
   if (artifact.processing_status === 'ocr_required') {
     return (
       <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-8 text-center">
@@ -123,8 +126,20 @@ export function MetadataView({ artifact }: MetadataViewProps) {
               <div className="mt-4 space-y-3">
                 {artifact.persons.map((person) => (
                   <div key={person.person_id} className="flex items-start justify-between">
-                    <div>
-                      <p className="font-medium text-gray-900">{person.person_name}</p>
+                    <div className="flex-1">
+                      {person.stakeholder_id?.Valid && person.stakeholder_id.String ? (
+                        /* Person is linked to a stakeholder */
+                        <Link
+                          to={`/programs/${programId}/stakeholders/${person.stakeholder_id.String}`}
+                          className="group inline-flex items-center font-medium text-blue-600 hover:text-blue-700"
+                        >
+                          {person.person_name}
+                          <LinkIcon className="h-3.5 w-3.5 ml-1.5 opacity-60 group-hover:opacity-100" />
+                        </Link>
+                      ) : (
+                        /* Person not yet linked */
+                        <p className="font-medium text-gray-900">{person.person_name}</p>
+                      )}
                       {person.person_role?.Valid && (
                         <p className="text-sm text-gray-600">{person.person_role.String}</p>
                       )}
@@ -132,11 +147,18 @@ export function MetadataView({ artifact }: MetadataViewProps) {
                         <p className="text-sm text-gray-500">{person.person_organization.String}</p>
                       )}
                     </div>
-                    {person.confidence_score?.Valid && (
-                      <span className="text-xs text-gray-500">
-                        {(person.confidence_score.Float64 * 100).toFixed(0)}% confidence
-                      </span>
-                    )}
+                    <div className="flex flex-col items-end gap-1">
+                      {person.confidence_score?.Valid && (
+                        <span className="text-xs text-gray-500">
+                          {(person.confidence_score.Float64 * 100).toFixed(0)}% confidence
+                        </span>
+                      )}
+                      {!person.stakeholder_id?.Valid && (
+                        <span className="text-xs text-amber-600 bg-amber-50 px-2 py-0.5 rounded">
+                          Not linked
+                        </span>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>

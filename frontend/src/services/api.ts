@@ -9,6 +9,23 @@ const api = axios.create({
   },
 })
 
+// Add response interceptor to extract error messages from API responses
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    // Extract error message from API response if available
+    if (error.response?.data?.error) {
+      // Create a new error with the API's error message
+      const apiError = new Error(error.response.data.error)
+      // Preserve the original error for debugging
+      ;(apiError as any).originalError = error
+      ;(apiError as any).response = error.response
+      return Promise.reject(apiError)
+    }
+    return Promise.reject(error)
+  }
+)
+
 // Nullable types from Go sql.Null* structures
 export interface NullString {
   String: string
@@ -104,6 +121,7 @@ export interface Program {
   start_date?: NullTime
   end_date?: NullTime
   status: 'active' | 'planning' | 'on-hold' | 'completed' | 'archived'
+  internal_organization: string
   created_at: string
   created_by: string
   updated_at: string
@@ -536,6 +554,11 @@ export interface RiskArtifactLink {
   created_at: string
 }
 
+export interface RiskListWithSuggestionsResponse {
+  risks: Risk[]
+  suggestions: RiskSuggestion[]
+}
+
 export interface ConversationThread {
   thread_id: string
   risk_id: string
@@ -563,10 +586,34 @@ export interface ConversationMessage {
   deleted_at?: NullString
 }
 
+export interface RiskEnrichment {
+  enrichment_id: string
+  artifact_id: string
+  source_insight_id?: string
+  enrichment_type: string
+  title: string
+  content: string
+  created_at: string
+  updated_at: string
+
+  // Link metadata (risk-specific)
+  link_id: string
+  match_score: number
+  match_method: string
+  is_relevant?: NullBool
+  reviewed_by?: string
+  reviewed_at?: string
+
+  // Additional context
+  artifact_filename: string
+  related_risk_count: number
+}
+
 export interface RiskWithMetadata extends Risk {
   mitigations?: RiskMitigation[]
   linked_artifacts?: RiskArtifactLink[]
   threads?: ConversationThread[]
+  enrichments?: RiskEnrichment[]
 }
 
 export interface ThreadWithMessages extends ConversationThread {
@@ -610,6 +657,20 @@ export const riskApi = {
     return response.data.data.risks as Risk[]
   },
 
+  listRisksWithSuggestions: async (programId: string, params?: {
+    status?: string
+    category?: string
+    severity?: string
+    owner_user_id?: string
+    limit?: number
+    offset?: number
+  }) => {
+    const response = await api.get(`/programs/${programId}/risks`, {
+      params: { ...params, include_suggestions: true }
+    })
+    return response.data.data as RiskListWithSuggestionsResponse
+  },
+
   getRisk: async (programId: string, riskId: string) => {
     const response = await api.get(`/programs/${programId}/risks/${riskId}`)
     return response.data.data as RiskWithMetadata
@@ -641,7 +702,7 @@ export const riskApi = {
     override_impact?: string
     override_category?: string
   }) => {
-    const response = await api.post(`/programs/${programId}/risks/suggestions/${suggestionId}/approve`, data)
+    const response = await api.post(`/programs/${programId}/risks/suggestions/${suggestionId}/approve`, data || {})
     return response.data.data
   },
 
@@ -712,6 +773,222 @@ export const riskApi = {
       message_format: messageFormat,
     })
     return response.data.data
+  },
+
+  // Enrichments
+  getEnrichments: async (programId: string, riskId: string) => {
+    const response = await api.get(`/programs/${programId}/risks/${riskId}/enrichments`)
+    return response.data.data.enrichments as RiskEnrichment[]
+  },
+
+  acceptEnrichment: async (programId: string, riskId: string, enrichmentId: string, reviewedBy: string) => {
+    await api.post(`/programs/${programId}/risks/${riskId}/enrichments/${enrichmentId}/accept`, {
+      reviewed_by: reviewedBy,
+    })
+  },
+
+  rejectEnrichment: async (programId: string, riskId: string, enrichmentId: string, reviewedBy: string) => {
+    await api.post(`/programs/${programId}/risks/${riskId}/enrichments/${enrichmentId}/reject`, {
+      reviewed_by: reviewedBy,
+    })
+  },
+}
+
+// Stakeholder interfaces
+export interface Stakeholder {
+  stakeholder_id: string
+  program_id: string
+  person_name: string
+  stakeholder_type: 'internal' | 'external' | 'vendor' | 'partner' | 'customer'
+  is_internal: boolean
+  email?: NullString
+  role?: NullString
+  organization?: NullString
+  engagement_level?: NullString
+  department?: NullString
+  notes?: NullString
+  created_at: string
+  updated_at: string
+  deleted_at?: NullString
+}
+
+export interface CreateStakeholderRequest {
+  person_name: string
+  stakeholder_type: string
+  is_internal: boolean
+  email?: string
+  role?: string
+  organization?: string
+  engagement_level?: string
+  department?: string
+  notes?: string
+}
+
+export interface UpdateStakeholderRequest {
+  person_name?: string
+  stakeholder_type?: string
+  is_internal?: boolean
+  email?: string
+  role?: string
+  organization?: string
+  engagement_level?: string
+  department?: string
+  notes?: string
+}
+
+export interface PersonSuggestion {
+  person_id: string
+  person_name: string
+  person_role?: NullString
+  person_organization?: NullString
+  confidence_score?: { Float64: number; Valid: boolean }
+  artifact_count: number
+  total_mentions: number
+  last_mentioned: string
+  suggested_stakeholder_id?: string  // UUID string or null (not NullString format)
+  similarity_score?: number
+  artifacts: SuggestionArtifact[]
+  suggested_stakeholder_type: string
+  suggested_is_internal: boolean
+}
+
+export interface SuggestionArtifact {
+  artifact_id: string
+  filename: string
+  mention_count: number
+}
+
+export interface GroupedSuggestion {
+  group_id: string
+  suggested_name: string
+  status: 'pending' | 'confirmed' | 'rejected' | 'merged'
+  has_role_conflicts: boolean
+  has_org_conflicts: boolean
+  total_persons: number
+  total_artifacts: number
+  total_mentions: number
+  average_confidence: number
+  last_mentioned: string
+  role_options?: ConflictOption[]
+  org_options?: ConflictOption[]
+  members: GroupMember[]
+  all_contexts: ContextMention[]
+}
+
+export interface ConflictOption {
+  value: string
+  count: number
+  confidence: number
+}
+
+export interface GroupMember {
+  person_id: string
+  person_name: string
+  person_role?: NullString
+  person_organization?: NullString
+  confidence_score: number
+  similarity_score: number
+  artifact_count: number
+  mention_count: number
+}
+
+export interface ContextMention {
+  artifact_id: string
+  artifact_name: string
+  uploaded_at: string
+  snippet: string
+  person_name: string
+}
+
+export interface LinkedArtifact {
+  artifact_id: string
+  filename: string
+  uploaded_at: string
+  mention_count: number
+}
+
+// Stakeholder API
+export const stakeholdersApi = {
+  listStakeholders: async (programId: string, params?: {
+    type?: string
+    is_internal?: boolean
+    engagement_level?: string
+    limit?: number
+    offset?: number
+  }) => {
+    const response = await api.get(`/programs/${programId}/stakeholders`, { params })
+    return response.data.data.stakeholders as Stakeholder[]
+  },
+
+  getStakeholder: async (programId: string, stakeholderId: string) => {
+    const response = await api.get(`/programs/${programId}/stakeholders/${stakeholderId}`)
+    return response.data.data as Stakeholder
+  },
+
+  createStakeholder: async (programId: string, request: CreateStakeholderRequest) => {
+    const response = await api.post(`/programs/${programId}/stakeholders`, request)
+    return response.data.data
+  },
+
+  updateStakeholder: async (programId: string, stakeholderId: string, updates: UpdateStakeholderRequest) => {
+    await api.put(`/programs/${programId}/stakeholders/${stakeholderId}`, updates)
+  },
+
+  deleteStakeholder: async (programId: string, stakeholderId: string) => {
+    await api.delete(`/programs/${programId}/stakeholders/${stakeholderId}`)
+  },
+
+  getSuggestions: async (programId: string) => {
+    const response = await api.get(`/programs/${programId}/stakeholders/suggestions`)
+    return response.data.data.suggestions as PersonSuggestion[]
+  },
+
+  linkPerson: async (programId: string, personId: string, stakeholderId: string) => {
+    const response = await api.post(`/programs/${programId}/persons/${personId}/link`, {
+      stakeholder_id: stakeholderId,
+    })
+    return response.data.data
+  },
+
+  getGroupedSuggestions: async (programId: string) => {
+    const response = await api.get(`/programs/${programId}/stakeholders/suggestions/grouped`)
+    return response.data.data.groups as GroupedSuggestion[]
+  },
+
+  confirmMergeGroup: async (programId: string, groupId: string, request: {
+    selected_name: string
+    selected_role?: string
+    selected_organization?: string
+    create_stakeholder: boolean
+  }) => {
+    const response = await api.post(
+      `/programs/${programId}/stakeholders/suggestions/groups/${groupId}/confirm`,
+      request
+    )
+    return response.data.data
+  },
+
+  rejectMergeGroup: async (programId: string, groupId: string) => {
+    await api.post(`/programs/${programId}/stakeholders/suggestions/groups/${groupId}/reject`)
+  },
+
+  modifyGroupMembers: async (programId: string, groupId: string, request: {
+    add_person_ids?: string[]
+    remove_person_ids?: string[]
+  }) => {
+    await api.post(
+      `/programs/${programId}/stakeholders/suggestions/groups/${groupId}/members`,
+      request
+    )
+  },
+
+  refreshGrouping: async (programId: string) => {
+    await api.post(`/programs/${programId}/stakeholders/suggestions/refresh-grouping`)
+  },
+
+  getLinkedArtifacts: async (programId: string, stakeholderId: string) => {
+    const response = await api.get(`/programs/${programId}/stakeholders/${stakeholderId}/artifacts`)
+    return response.data.data.artifacts as LinkedArtifact[]
   },
 }
 

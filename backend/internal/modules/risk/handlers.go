@@ -38,6 +38,11 @@ func RegisterRoutes(r chi.Router, service *Service, conversationService *Convers
 			r.Delete("/artifacts/{linkId}", handleUnlinkArtifact(service))
 			r.Get("/artifacts", handleGetLinkedArtifacts(service))
 
+			// Enrichments
+			r.Get("/enrichments", handleGetEnrichments(service))
+			r.Post("/enrichments/{enrichmentId}/accept", handleAcceptEnrichment(service))
+			r.Post("/enrichments/{enrichmentId}/reject", handleRejectEnrichment(service))
+
 			// Conversation threads
 			r.Post("/threads", handleCreateThread(conversationService))
 			r.Get("/threads", handleListThreads(conversationService))
@@ -111,7 +116,7 @@ func handleGetRisk(service *Service) http.HandlerFunc {
 			return
 		}
 
-		respondJSON(w, http.StatusOK, risk)
+		respondSuccess(w, risk)
 	}
 }
 
@@ -131,7 +136,7 @@ func handleGetRiskWithContext(service *Service) http.HandlerFunc {
 			return
 		}
 
-		respondJSON(w, http.StatusOK, riskWithMetadata)
+		respondSuccess(w, riskWithMetadata)
 	}
 }
 
@@ -163,13 +168,28 @@ func handleListRisks(service *Service) http.HandlerFunc {
 			}
 		}
 
-		risks, err := service.ListRisks(r.Context(), filter)
-		if err != nil {
-			respondError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
+		// Check if suggestions should be included
+		includeSuggestions := r.URL.Query().Get("include_suggestions") == "true"
 
-		respondJSON(w, http.StatusOK, risks)
+		if includeSuggestions {
+			// Use new endpoint that includes suggestions
+			response, err := service.ListRisksWithSuggestions(r.Context(), filter, true)
+			if err != nil {
+				respondError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			respondSuccess(w, response)
+		} else {
+			// Use existing endpoint (backward compatibility)
+			risks, err := service.ListRisks(r.Context(), filter)
+			if err != nil {
+				respondError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			respondSuccess(w, map[string]interface{}{
+				"risks": risks,
+			})
+		}
 	}
 }
 
@@ -241,7 +261,9 @@ func handleListSuggestions(service *Service) http.HandlerFunc {
 			return
 		}
 
-		respondJSON(w, http.StatusOK, suggestions)
+		respondSuccess(w, map[string]interface{}{
+			"suggestions": suggestions,
+		})
 	}
 }
 
@@ -691,6 +713,104 @@ func handleDeleteMessage(service *ConversationService) http.HandlerFunc {
 	}
 }
 
+// handleGetEnrichments retrieves enrichments for a risk
+func handleGetEnrichments(service *Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		riskIDStr := chi.URLParam(r, "riskId")
+		riskID, err := uuid.Parse(riskIDStr)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "Invalid risk ID")
+			return
+		}
+
+		enrichments, err := service.GetEnrichments(r.Context(), riskID)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		respondSuccess(w, map[string]interface{}{
+			"enrichments": enrichments,
+		})
+	}
+}
+
+// handleAcceptEnrichment accepts an enrichment as relevant
+func handleAcceptEnrichment(service *Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		riskIDStr := chi.URLParam(r, "riskId")
+		riskID, err := uuid.Parse(riskIDStr)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "Invalid risk ID")
+			return
+		}
+
+		enrichmentIDStr := chi.URLParam(r, "enrichmentId")
+		enrichmentID, err := uuid.Parse(enrichmentIDStr)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "Invalid enrichment ID")
+			return
+		}
+
+		// Get reviewed_by from request body or auth context
+		var req struct {
+			ReviewedBy uuid.UUID `json:"reviewed_by"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			respondError(w, http.StatusBadRequest, "Invalid request body")
+			return
+		}
+
+		err = service.AcceptEnrichment(r.Context(), riskID, enrichmentID, req.ReviewedBy)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		respondSuccess(w, map[string]string{
+			"message": "Enrichment accepted successfully",
+		})
+	}
+}
+
+// handleRejectEnrichment rejects an enrichment as not relevant
+func handleRejectEnrichment(service *Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		riskIDStr := chi.URLParam(r, "riskId")
+		riskID, err := uuid.Parse(riskIDStr)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "Invalid risk ID")
+			return
+		}
+
+		enrichmentIDStr := chi.URLParam(r, "enrichmentId")
+		enrichmentID, err := uuid.Parse(enrichmentIDStr)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "Invalid enrichment ID")
+			return
+		}
+
+		// Get reviewed_by from request body or auth context
+		var req struct {
+			ReviewedBy uuid.UUID `json:"reviewed_by"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			respondError(w, http.StatusBadRequest, "Invalid request body")
+			return
+		}
+
+		err = service.RejectEnrichment(r.Context(), riskID, enrichmentID, req.ReviewedBy)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		respondSuccess(w, map[string]string{
+			"message": "Enrichment rejected successfully",
+		})
+	}
+}
+
 // Helper functions
 
 func parseIntParam(r *http.Request, key string, defaultValue int) int {
@@ -708,8 +828,16 @@ func respondJSON(w http.ResponseWriter, status int, data interface{}) {
 	json.NewEncoder(w).Encode(data)
 }
 
+func respondSuccess(w http.ResponseWriter, data interface{}) {
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"data": data,
+	})
+}
+
 func respondCreated(w http.ResponseWriter, data interface{}) {
-	respondJSON(w, http.StatusCreated, data)
+	respondJSON(w, http.StatusCreated, map[string]interface{}{
+		"data": data,
+	})
 }
 
 func respondError(w http.ResponseWriter, status int, message string) {

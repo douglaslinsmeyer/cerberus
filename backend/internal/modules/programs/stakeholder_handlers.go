@@ -15,13 +15,26 @@ func RegisterStakeholderRoutes(r chi.Router, repo *StakeholderRepository) {
 	r.Route("/programs/{programId}/stakeholders", func(r chi.Router) {
 		r.Get("/", handleListStakeholders(repo))
 		r.Post("/", handleCreateStakeholder(repo))
+		r.Get("/suggestions", handleGetSuggestions(repo))
+		r.Get("/suggestions/grouped", handleGetGroupedSuggestions(repo))
+		r.Post("/suggestions/refresh-grouping", handleRefreshGrouping(repo))
+
+		r.Route("/suggestions/groups/{groupId}", func(r chi.Router) {
+			r.Post("/confirm", handleConfirmMergeGroup(repo))
+			r.Post("/reject", handleRejectMergeGroup(repo))
+			r.Post("/members", handleModifyGroupMembers(repo))
+		})
 
 		r.Route("/{stakeholderId}", func(r chi.Router) {
 			r.Get("/", handleGetStakeholder(repo))
 			r.Put("/", handleUpdateStakeholder(repo))
 			r.Delete("/", handleDeleteStakeholder(repo))
+			r.Get("/artifacts", handleGetLinkedArtifacts(repo))
 		})
 	})
+
+	// Person linking endpoint
+	r.Post("/programs/{programId}/persons/{personId}/link", handleLinkPerson(repo))
 }
 
 // handleListStakeholders lists all stakeholders for a program with optional filtering
@@ -312,4 +325,213 @@ func toNullString(s string) sql.NullString {
 		return sql.NullString{Valid: false}
 	}
 	return sql.NullString{String: s, Valid: true}
+}
+
+// handleGetSuggestions returns person mentions that haven't been linked to stakeholders
+func handleGetSuggestions(repo *StakeholderRepository) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		programIDStr := chi.URLParam(r, "programId")
+		programID, err := uuid.Parse(programIDStr)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "Invalid program ID")
+			return
+		}
+
+		suggestions, err := repo.GetSuggestions(r.Context(), programID)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		respondSuccess(w, map[string]interface{}{
+			"suggestions": suggestions,
+		})
+	}
+}
+
+// handleLinkPerson links a person mention to a stakeholder
+func handleLinkPerson(repo *StakeholderRepository) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		programIDStr := chi.URLParam(r, "programId")
+		_, err := uuid.Parse(programIDStr)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "Invalid program ID")
+			return
+		}
+
+		personIDStr := chi.URLParam(r, "personId")
+		personID, err := uuid.Parse(personIDStr)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "Invalid person ID")
+			return
+		}
+
+		var req LinkPersonRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			respondError(w, http.StatusBadRequest, "Invalid request body")
+			return
+		}
+
+		if err := repo.LinkPersonToStakeholder(r.Context(), personID, req.StakeholderID); err != nil {
+			respondError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		respondSuccess(w, map[string]interface{}{
+			"message": "Person successfully linked to stakeholder",
+		})
+	}
+}
+
+// handleGetGroupedSuggestions retrieves grouped person suggestions
+func handleGetGroupedSuggestions(repo *StakeholderRepository) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		programIDStr := chi.URLParam(r, "programId")
+		programID, err := uuid.Parse(programIDStr)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "Invalid program ID")
+			return
+		}
+
+		groups, err := repo.GetGroupedSuggestions(r.Context(), programID)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		respondSuccess(w, map[string]interface{}{
+			"groups": groups,
+		})
+	}
+}
+
+// handleConfirmMergeGroup confirms a merge group and optionally creates a stakeholder
+func handleConfirmMergeGroup(repo *StakeholderRepository) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		groupIDStr := chi.URLParam(r, "groupId")
+		groupID, err := uuid.Parse(groupIDStr)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "Invalid group ID")
+			return
+		}
+
+		var req ConfirmMergeGroupRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			respondError(w, http.StatusBadRequest, "Invalid request body")
+			return
+		}
+
+		// Validate required fields
+		if req.SelectedName == "" {
+			respondError(w, http.StatusBadRequest, "selected_name is required")
+			return
+		}
+
+		stakeholder, err := repo.ConfirmMergeGroup(r.Context(), groupID, req)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		response := map[string]interface{}{
+			"message": "Merge group confirmed successfully",
+		}
+
+		if stakeholder != nil {
+			response["stakeholder"] = stakeholder
+		}
+
+		respondSuccess(w, response)
+	}
+}
+
+// handleRejectMergeGroup marks a merge group as rejected
+func handleRejectMergeGroup(repo *StakeholderRepository) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		groupIDStr := chi.URLParam(r, "groupId")
+		groupID, err := uuid.Parse(groupIDStr)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "Invalid group ID")
+			return
+		}
+
+		if err := repo.RejectMergeGroup(r.Context(), groupID); err != nil {
+			respondError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		respondSuccess(w, map[string]interface{}{
+			"message": "Merge group rejected successfully",
+		})
+	}
+}
+
+// handleModifyGroupMembers adds or removes persons from a merge group
+func handleModifyGroupMembers(repo *StakeholderRepository) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		groupIDStr := chi.URLParam(r, "groupId")
+		groupID, err := uuid.Parse(groupIDStr)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "Invalid group ID")
+			return
+		}
+
+		var req ModifyGroupMembersRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			respondError(w, http.StatusBadRequest, "Invalid request body")
+			return
+		}
+
+		if err := repo.ModifyGroupMembers(r.Context(), groupID, req); err != nil {
+			respondError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		respondSuccess(w, map[string]interface{}{
+			"message": "Group members modified successfully",
+		})
+	}
+}
+
+// handleRefreshGrouping triggers re-run of grouping algorithm
+func handleRefreshGrouping(repo *StakeholderRepository) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		programIDStr := chi.URLParam(r, "programId")
+		programID, err := uuid.Parse(programIDStr)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "Invalid program ID")
+			return
+		}
+
+		if err := repo.GroupPersonSuggestions(r.Context(), programID); err != nil {
+			respondError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		respondSuccess(w, map[string]interface{}{
+			"message": "Person grouping refreshed successfully",
+		})
+	}
+}
+
+// handleGetLinkedArtifacts retrieves all artifacts where a stakeholder is mentioned
+func handleGetLinkedArtifacts(repo *StakeholderRepository) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		stakeholderIDStr := chi.URLParam(r, "stakeholderId")
+		stakeholderID, err := uuid.Parse(stakeholderIDStr)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "Invalid stakeholder ID")
+			return
+		}
+
+		artifacts, err := repo.GetLinkedArtifacts(r.Context(), stakeholderID)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		respondSuccess(w, map[string]interface{}{
+			"artifacts": artifacts,
+		})
+	}
 }

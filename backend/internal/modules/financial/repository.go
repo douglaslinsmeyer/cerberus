@@ -34,6 +34,8 @@ type RepositoryInterface interface {
 	UpdateInvoice(ctx context.Context, invoice *Invoice) error
 	DeleteInvoice(ctx context.Context, invoiceID uuid.UUID) error
 	GetInvoiceByArtifactID(ctx context.Context, artifactID uuid.UUID) (*Invoice, error)
+	GetInvoicesByIdentifier(ctx context.Context, programID uuid.UUID, vendorName string, invoiceNumber string) ([]Invoice, error)
+	SoftDeleteInvoiceWithReplacement(ctx context.Context, oldInvoiceID uuid.UUID, newInvoiceID uuid.UUID, reason string) error
 
 	// Invoice Line Items
 	SaveLineItems(ctx context.Context, lineItems []InvoiceLineItem) error
@@ -168,7 +170,7 @@ func (r *Repository) ListRateCardsByProgram(ctx context.Context, programID uuid.
 	}
 	defer rows.Close()
 
-	var rateCards []RateCard
+	rateCards := make([]RateCard, 0)
 	for rows.Next() {
 		var rc RateCard
 		err := rows.Scan(
@@ -215,7 +217,7 @@ func (r *Repository) GetActiveRateCards(ctx context.Context, programID uuid.UUID
 	}
 	defer rows.Close()
 
-	var rateCards []RateCard
+	rateCards := make([]RateCard, 0)
 	for rows.Next() {
 		var rc RateCard
 		err := rows.Scan(
@@ -355,7 +357,7 @@ func (r *Repository) GetRateCardItems(ctx context.Context, rateCardID uuid.UUID)
 	}
 	defer rows.Close()
 
-	var items []RateCardItem
+	items := make([]RateCardItem, 0)
 	for rows.Next() {
 		var item RateCardItem
 		err := rows.Scan(
@@ -475,8 +477,8 @@ func (r *Repository) CreateInvoice(ctx context.Context, invoice *Invoice) error 
 			vendor_id, invoice_date, due_date, period_start_date, period_end_date,
 			subtotal_amount, tax_amount, total_amount, currency, processing_status,
 			payment_status, ai_model_version, ai_confidence_score, ai_processing_time_ms,
-			submitted_by, submitted_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+			submitted_by, submitted_at, replaced_by_invoice_id
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
 	`
 
 	_, err := r.db.ExecContext(ctx, query,
@@ -501,6 +503,7 @@ func (r *Repository) CreateInvoice(ctx context.Context, invoice *Invoice) error 
 		invoice.AIProcessingTimeMs,
 		invoice.SubmittedBy,
 		invoice.SubmittedAt,
+		invoice.ReplacedByInvoiceID,
 	)
 
 	if err != nil {
@@ -613,6 +616,112 @@ func (r *Repository) GetInvoiceByArtifactID(ctx context.Context, artifactID uuid
 	return &inv, nil
 }
 
+// GetInvoicesByIdentifier finds invoices matching business identifiers
+// Used for duplicate detection when processing new invoices
+func (r *Repository) GetInvoicesByIdentifier(ctx context.Context, programID uuid.UUID, vendorName string, invoiceNumber string) ([]Invoice, error) {
+	query := `
+		SELECT invoice_id, program_id, artifact_id, invoice_number, vendor_name,
+			   vendor_id, invoice_date, due_date, period_start_date, period_end_date,
+			   subtotal_amount, tax_amount, total_amount, currency, processing_status,
+			   payment_status, ai_model_version, ai_confidence_score, ai_processing_time_ms,
+			   submitted_by, submitted_at, approved_by, approved_at, rejected_reason, deleted_at
+		FROM invoices
+		WHERE program_id = $1
+		  AND vendor_name = $2
+		  AND deleted_at IS NULL
+	`
+
+	args := []interface{}{programID, vendorName}
+
+	// Only filter by invoice_number if provided (it's optional in schema)
+	if invoiceNumber != "" {
+		query += " AND invoice_number = $3"
+		args = append(args, invoiceNumber)
+	}
+
+	query += " ORDER BY submitted_at DESC"
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query invoices by identifier: %w", err)
+	}
+	defer rows.Close()
+
+	invoices := make([]Invoice, 0)
+	for rows.Next() {
+		var inv Invoice
+		err := rows.Scan(
+			&inv.InvoiceID,
+			&inv.ProgramID,
+			&inv.ArtifactID,
+			&inv.InvoiceNumber,
+			&inv.VendorName,
+			&inv.VendorID,
+			&inv.InvoiceDate,
+			&inv.DueDate,
+			&inv.PeriodStartDate,
+			&inv.PeriodEndDate,
+			&inv.SubtotalAmount,
+			&inv.TaxAmount,
+			&inv.TotalAmount,
+			&inv.Currency,
+			&inv.ProcessingStatus,
+			&inv.PaymentStatus,
+			&inv.AIModelVersion,
+			&inv.AIConfidenceScore,
+			&inv.AIProcessingTimeMs,
+			&inv.SubmittedBy,
+			&inv.SubmittedAt,
+			&inv.ApprovedBy,
+			&inv.ApprovedAt,
+			&inv.RejectedReason,
+			&inv.DeletedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan invoice: %w", err)
+		}
+		invoices = append(invoices, inv)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating invoice rows: %w", err)
+	}
+
+	return invoices, nil
+}
+
+// SoftDeleteInvoiceWithReplacement marks invoice as deleted and links to replacement
+// Used when an artifact is replaced to maintain audit trail
+func (r *Repository) SoftDeleteInvoiceWithReplacement(ctx context.Context, oldInvoiceID uuid.UUID, newInvoiceID uuid.UUID, reason string) error {
+	query := `
+		UPDATE invoices
+		SET deleted_at = NOW(),
+		    replaced_by_invoice_id = $1,
+		    rejected_reason = CASE
+		        WHEN rejected_reason IS NULL THEN $2
+		        ELSE rejected_reason || '; ' || $2
+		    END
+		WHERE invoice_id = $3 AND deleted_at IS NULL
+	`
+
+	result, err := r.db.ExecContext(ctx, query, newInvoiceID, reason, oldInvoiceID)
+	if err != nil {
+		return fmt.Errorf("failed to soft-delete invoice with replacement: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to check rows affected: %w", err)
+	}
+
+	if rows == 0 {
+		// Not an error - invoice may already be deleted
+		return nil
+	}
+
+	return nil
+}
+
 // ListInvoices retrieves invoices with optional filters
 func (r *Repository) ListInvoices(ctx context.Context, filter InvoiceFilterRequest) ([]Invoice, error) {
 	query := `
@@ -675,7 +784,7 @@ func (r *Repository) ListInvoices(ctx context.Context, filter InvoiceFilterReque
 	}
 	defer rows.Close()
 
-	var invoices []Invoice
+	invoices := make([]Invoice, 0)
 	for rows.Next() {
 		var inv Invoice
 		err := rows.Scan(
@@ -837,7 +946,7 @@ func (r *Repository) GetLineItems(ctx context.Context, invoiceID uuid.UUID) ([]I
 	}
 	defer rows.Close()
 
-	var items []InvoiceLineItem
+	items := make([]InvoiceLineItem, 0)
 	for rows.Next() {
 		var item InvoiceLineItem
 		err := rows.Scan(
@@ -1054,7 +1163,7 @@ func (r *Repository) ListBudgetCategories(ctx context.Context, programID uuid.UU
 	}
 	defer rows.Close()
 
-	var categories []BudgetCategory
+	categories := make([]BudgetCategory, 0)
 	for rows.Next() {
 		var cat BudgetCategory
 		err := rows.Scan(
@@ -1200,7 +1309,7 @@ func (r *Repository) GetVariances(ctx context.Context, invoiceID uuid.UUID) ([]F
 	}
 	defer rows.Close()
 
-	var variances []FinancialVariance
+	variances := make([]FinancialVariance, 0)
 	for rows.Next() {
 		var v FinancialVariance
 		err := rows.Scan(
@@ -1265,7 +1374,7 @@ func (r *Repository) GetVariancesByProgram(ctx context.Context, programID uuid.U
 	}
 	defer rows.Close()
 
-	var variances []FinancialVariance
+	variances := make([]FinancialVariance, 0)
 	for rows.Next() {
 		var v FinancialVariance
 		err := rows.Scan(

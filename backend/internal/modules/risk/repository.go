@@ -16,6 +16,7 @@ type RepositoryInterface interface {
 	CreateRisk(ctx context.Context, risk *Risk) error
 	GetRiskByID(ctx context.Context, riskID uuid.UUID) (*Risk, error)
 	ListRisks(ctx context.Context, filter RiskFilterRequest) ([]Risk, error)
+	ListRisksWithSuggestions(ctx context.Context, filter RiskFilterRequest, includeSuggestions bool) (*RiskListWithSuggestionsResponse, error)
 	UpdateRisk(ctx context.Context, risk *Risk) error
 	DeleteRisk(ctx context.Context, riskID uuid.UUID) error
 
@@ -49,6 +50,11 @@ type RepositoryInterface interface {
 	CreateMessage(ctx context.Context, message *ConversationMessage) error
 	GetThreadMessages(ctx context.Context, threadID uuid.UUID) ([]ConversationMessage, error)
 	DeleteMessage(ctx context.Context, messageID uuid.UUID) error
+
+	// Risk Enrichments
+	CreateEnrichment(ctx context.Context, enrichment *RiskEnrichment) error
+	GetEnrichmentsByRisk(ctx context.Context, riskID uuid.UUID) ([]RiskEnrichmentWithMetadata, error)
+	UpdateEnrichmentRelevance(ctx context.Context, riskID uuid.UUID, enrichmentID uuid.UUID, isRelevant bool, reviewedBy uuid.UUID) error
 
 	// Composed Queries
 	GetRiskWithContext(ctx context.Context, riskID uuid.UUID) (*RiskWithMetadata, error)
@@ -223,7 +229,7 @@ func (r *Repository) ListRisks(ctx context.Context, filter RiskFilterRequest) ([
 	}
 	defer rows.Close()
 
-	var risks []Risk
+	risks := make([]Risk, 0)
 	for rows.Next() {
 		var risk Risk
 		err := rows.Scan(
@@ -251,6 +257,93 @@ func (r *Repository) ListRisks(ctx context.Context, filter RiskFilterRequest) ([
 	}
 
 	return risks, nil
+}
+
+// ListRisksWithSuggestions retrieves both risks and pending suggestions for a program
+func (r *Repository) ListRisksWithSuggestions(ctx context.Context, filter RiskFilterRequest, includeSuggestions bool) (*RiskListWithSuggestionsResponse, error) {
+	// Fetch risks using existing method
+	risks, err := r.ListRisks(ctx, filter)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list risks: %w", err)
+	}
+
+	response := &RiskListWithSuggestionsResponse{
+		Risks:       risks,
+		Suggestions: []RiskSuggestion{},
+	}
+
+	if !includeSuggestions {
+		return response, nil
+	}
+
+	// Fetch pending suggestions
+	query := `
+		SELECT suggestion_id, program_id, title, description, rationale,
+		       suggested_probability, suggested_impact, suggested_severity, suggested_category,
+		       source_type, source_artifact_ids, ai_confidence_score, ai_detected_at,
+		       is_approved, is_dismissed, created_risk_id
+		FROM risk_suggestions
+		WHERE program_id = $1 AND is_approved = FALSE AND is_dismissed = FALSE
+	`
+
+	args := []interface{}{filter.ProgramID}
+	argCount := 1
+
+	// Apply severity filter to suggestions if provided
+	if filter.Severity != "" {
+		argCount++
+		query += fmt.Sprintf(" AND suggested_severity = $%d", argCount)
+		args = append(args, filter.Severity)
+	}
+
+	// Apply category filter to suggestions if provided
+	if filter.Category != "" {
+		argCount++
+		query += fmt.Sprintf(" AND suggested_category = $%d", argCount)
+		args = append(args, filter.Category)
+	}
+
+	query += " ORDER BY suggested_severity DESC, ai_detected_at DESC"
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list risk suggestions: %w", err)
+	}
+	defer rows.Close()
+
+	suggestions := make([]RiskSuggestion, 0)
+	for rows.Next() {
+		var suggestion RiskSuggestion
+		err := rows.Scan(
+			&suggestion.SuggestionID,
+			&suggestion.ProgramID,
+			&suggestion.Title,
+			&suggestion.Description,
+			&suggestion.Rationale,
+			&suggestion.SuggestedProbability,
+			&suggestion.SuggestedImpact,
+			&suggestion.SuggestedSeverity,
+			&suggestion.SuggestedCategory,
+			&suggestion.SourceType,
+			pq.Array(&suggestion.SourceArtifactIDs),
+			&suggestion.AIConfidenceScore,
+			&suggestion.AIDetectedAt,
+			&suggestion.IsApproved,
+			&suggestion.IsDismissed,
+			&suggestion.CreatedRiskID,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan risk suggestion: %w", err)
+		}
+		suggestions = append(suggestions, suggestion)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating risk suggestions: %w", err)
+	}
+
+	response.Suggestions = suggestions
+	return response, nil
 }
 
 // UpdateRisk updates an existing risk
@@ -426,7 +519,7 @@ func (r *Repository) ListSuggestions(ctx context.Context, programID uuid.UUID, i
 	}
 	defer rows.Close()
 
-	var suggestions []RiskSuggestion
+	suggestions := make([]RiskSuggestion, 0)
 	for rows.Next() {
 		var suggestion RiskSuggestion
 		err := rows.Scan(
@@ -591,7 +684,7 @@ func (r *Repository) ListMitigationsByRisk(ctx context.Context, riskID uuid.UUID
 	}
 	defer rows.Close()
 
-	var mitigations []RiskMitigation
+	mitigations := make([]RiskMitigation, 0)
 	for rows.Next() {
 		var mitigation RiskMitigation
 		err := rows.Scan(
@@ -741,7 +834,7 @@ func (r *Repository) GetLinkedArtifacts(ctx context.Context, riskID uuid.UUID) (
 	}
 	defer rows.Close()
 
-	var links []RiskArtifactLink
+	links := make([]RiskArtifactLink, 0)
 	for rows.Next() {
 		var link RiskArtifactLink
 		err := rows.Scan(
@@ -781,7 +874,7 @@ func (r *Repository) GetRisksByArtifact(ctx context.Context, artifactID uuid.UUI
 	}
 	defer rows.Close()
 
-	var risks []Risk
+	risks := make([]Risk, 0)
 	for rows.Next() {
 		var risk Risk
 		err := rows.Scan(
@@ -886,7 +979,7 @@ func (r *Repository) ListThreadsByRisk(ctx context.Context, riskID uuid.UUID) ([
 	}
 	defer rows.Close()
 
-	var threads []ConversationThread
+	threads := make([]ConversationThread, 0)
 	for rows.Next() {
 		var thread ConversationThread
 		err := rows.Scan(
@@ -1003,7 +1096,7 @@ func (r *Repository) GetThreadMessages(ctx context.Context, threadID uuid.UUID) 
 	}
 	defer rows.Close()
 
-	var messages []ConversationMessage
+	messages := make([]ConversationMessage, 0)
 	for rows.Next() {
 		var message ConversationMessage
 		err := rows.Scan(
@@ -1051,6 +1144,166 @@ func (r *Repository) DeleteMessage(ctx context.Context, messageID uuid.UUID) err
 	return nil
 }
 
+// CreateEnrichment creates a new risk enrichment (with deduplication)
+func (r *Repository) CreateEnrichment(ctx context.Context, enrichment *RiskEnrichment) error {
+	// Check if enrichment already exists for this source insight
+	var existingEnrichmentID uuid.UUID
+	if enrichment.SourceInsightID.Valid {
+		err := r.db.QueryRowContext(ctx, `
+			SELECT enrichment_id FROM enrichments
+			WHERE source_insight_id = $1 AND deleted_at IS NULL
+		`, enrichment.SourceInsightID).Scan(&existingEnrichmentID)
+
+		if err != nil && err != sql.ErrNoRows {
+			return fmt.Errorf("failed to check existing enrichment: %w", err)
+		}
+	}
+
+	// If enrichment doesn't exist, create it
+	if existingEnrichmentID == uuid.Nil {
+		existingEnrichmentID = enrichment.EnrichmentID
+
+		_, err := r.db.ExecContext(ctx, `
+			INSERT INTO enrichments (
+				enrichment_id, artifact_id, source_insight_id,
+				enrichment_type, title, content, created_at, updated_at
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
+		`,
+			existingEnrichmentID,
+			enrichment.ArtifactID,
+			enrichment.SourceInsightID,
+			enrichment.EnrichmentType,
+			enrichment.Title,
+			enrichment.Content,
+			enrichment.CreatedAt,
+		)
+
+		if err != nil {
+			return fmt.Errorf("failed to create enrichment: %w", err)
+		}
+	}
+
+	// Create the risk-enrichment link
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO risk_enrichment_links (
+			risk_id, enrichment_id, match_score, match_method, linked_at
+		) VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (risk_id, enrichment_id) DO NOTHING
+	`,
+		enrichment.RiskID,
+		existingEnrichmentID,
+		enrichment.MatchScore,
+		enrichment.MatchMethod,
+		enrichment.CreatedAt,
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to create enrichment link: %w", err)
+	}
+
+	return nil
+}
+
+// GetEnrichmentsByRisk retrieves all enrichments for a risk with metadata
+func (r *Repository) GetEnrichmentsByRisk(ctx context.Context, riskID uuid.UUID) ([]RiskEnrichmentWithMetadata, error) {
+	query := `
+		SELECT
+			e.enrichment_id,
+			e.artifact_id,
+			e.source_insight_id,
+			e.enrichment_type,
+			e.title,
+			e.content,
+			e.created_at,
+			e.updated_at,
+
+			rel.link_id,
+			rel.match_score,
+			rel.match_method,
+			rel.is_relevant,
+			rel.reviewed_by,
+			rel.reviewed_at,
+
+			a.filename,
+			(
+				SELECT COUNT(DISTINCT rel2.risk_id) - 1
+				FROM risk_enrichment_links rel2
+				WHERE rel2.enrichment_id = e.enrichment_id
+			) as related_risk_count
+
+		FROM risk_enrichment_links rel
+		JOIN enrichments e ON rel.enrichment_id = e.enrichment_id
+		JOIN artifacts a ON e.artifact_id = a.artifact_id
+		WHERE rel.risk_id = $1
+		  AND e.deleted_at IS NULL
+		ORDER BY e.created_at DESC
+	`
+
+	rows, err := r.db.QueryContext(ctx, query, riskID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get enrichments: %w", err)
+	}
+	defer rows.Close()
+
+	enrichments := make([]RiskEnrichmentWithMetadata, 0)
+	for rows.Next() {
+		var e RiskEnrichmentWithMetadata
+		err := rows.Scan(
+			&e.EnrichmentID,
+			&e.ArtifactID,
+			&e.SourceInsightID,
+			&e.EnrichmentType,
+			&e.Title,
+			&e.Content,
+			&e.CreatedAt,
+			&e.UpdatedAt,
+			&e.LinkID,
+			&e.MatchScore,
+			&e.MatchMethod,
+			&e.IsRelevant,
+			&e.ReviewedBy,
+			&e.ReviewedAt,
+			&e.ArtifactFilename,
+			&e.RelatedRiskCount,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan enrichment: %w", err)
+		}
+		enrichments = append(enrichments, e)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating enrichments: %w", err)
+	}
+
+	return enrichments, nil
+}
+
+// UpdateEnrichmentRelevance updates the relevance status of an enrichment link
+func (r *Repository) UpdateEnrichmentRelevance(ctx context.Context, riskID uuid.UUID, enrichmentID uuid.UUID, isRelevant bool, reviewedBy uuid.UUID) error {
+	query := `
+		UPDATE risk_enrichment_links
+		SET is_relevant = $1, reviewed_by = $2, reviewed_at = NOW()
+		WHERE risk_id = $3 AND enrichment_id = $4
+	`
+
+	result, err := r.db.ExecContext(ctx, query, isRelevant, reviewedBy, riskID, enrichmentID)
+	if err != nil {
+		return fmt.Errorf("failed to update enrichment relevance: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to check rows affected: %w", err)
+	}
+
+	if rows == 0 {
+		return fmt.Errorf("enrichment link not found")
+	}
+
+	return nil
+}
+
 // GetRiskWithContext retrieves a risk with all its related entities
 func (r *Repository) GetRiskWithContext(ctx context.Context, riskID uuid.UUID) (*RiskWithMetadata, error) {
 	// Get risk
@@ -1083,6 +1336,13 @@ func (r *Repository) GetRiskWithContext(ctx context.Context, riskID uuid.UUID) (
 		return nil, fmt.Errorf("failed to get threads: %w", err)
 	}
 	result.Threads = threads
+
+	// Get enrichments
+	enrichments, err := r.GetEnrichmentsByRisk(ctx, riskID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get enrichments: %w", err)
+	}
+	result.Enrichments = enrichments
 
 	return result, nil
 }

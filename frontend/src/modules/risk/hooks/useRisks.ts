@@ -17,6 +17,22 @@ export function useRisks(programId: string, params?: {
   })
 }
 
+// Hook for listing risks with AI suggestions
+export function useRisksWithSuggestions(programId: string, params?: {
+  status?: string
+  category?: string
+  severity?: string
+  owner_user_id?: string
+  limit?: number
+  offset?: number
+}) {
+  return useQuery({
+    queryKey: ['risksWithSuggestions', programId, params],
+    queryFn: () => riskApi.listRisksWithSuggestions(programId, params),
+    enabled: !!programId,
+  })
+}
+
 // Hook for getting a single risk with metadata
 export function useRisk(programId: string, riskId: string) {
   return useQuery({
@@ -83,6 +99,7 @@ export function useApproveSuggestion(programId: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['riskSuggestions', programId] })
       queryClient.invalidateQueries({ queryKey: ['risks', programId] })
+      queryClient.invalidateQueries({ queryKey: ['risksWithSuggestions', programId] })
     },
   })
 }
@@ -96,6 +113,7 @@ export function useDismissSuggestion(programId: string) {
       riskApi.dismissSuggestion(programId, suggestionId, reason),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['riskSuggestions', programId] })
+      queryClient.invalidateQueries({ queryKey: ['risksWithSuggestions', programId] })
     },
   })
 }
@@ -212,6 +230,43 @@ export function useAddMessage(programId: string, riskId: string, threadId: strin
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['threadMessages', programId, riskId, threadId] })
       queryClient.invalidateQueries({ queryKey: ['threads', programId, riskId] })
+    },
+  })
+}
+
+// Hook for getting enrichments for a risk
+export function useEnrichments(programId: string, riskId: string) {
+  return useQuery({
+    queryKey: ['enrichments', programId, riskId],
+    queryFn: () => riskApi.getEnrichments(programId, riskId),
+    enabled: !!programId && !!riskId,
+  })
+}
+
+// Hook for accepting an enrichment
+export function useAcceptEnrichment(programId: string, riskId: string) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ enrichmentId, reviewedBy }: { enrichmentId: string; reviewedBy: string }) =>
+      riskApi.acceptEnrichment(programId, riskId, enrichmentId, reviewedBy),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['enrichments', programId, riskId] })
+      queryClient.invalidateQueries({ queryKey: ['risk', programId, riskId] })
+    },
+  })
+}
+
+// Hook for rejecting an enrichment
+export function useRejectEnrichment(programId: string, riskId: string) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ enrichmentId, reviewedBy }: { enrichmentId: string; reviewedBy: string }) =>
+      riskApi.rejectEnrichment(programId, riskId, enrichmentId, reviewedBy),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['enrichments', programId, riskId] })
+      queryClient.invalidateQueries({ queryKey: ['risk', programId, riskId] })
     },
   })
 }

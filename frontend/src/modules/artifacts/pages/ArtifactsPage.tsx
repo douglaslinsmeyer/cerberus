@@ -1,18 +1,19 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { MagnifyingGlassIcon, ArrowLeftIcon } from '@heroicons/react/24/outline'
 import { useArtifacts } from '../hooks/useArtifacts'
 import { ArtifactUploader } from '../components/ArtifactUploader'
 import { ArtifactList } from '../components/ArtifactList'
 
-// Hardcoded for Phase 2 (no auth yet)
-const DEFAULT_PROGRAM_ID = '00000000-0000-0000-0000-000000000001'
-
 export function ArtifactsPage() {
+  const { programId } = useParams<{ programId: string }>()
   const [statusFilter, setStatusFilter] = useState<string>('')
   const [showUploader, setShowUploader] = useState(false)
 
-  const { data: artifacts = [], isLoading, refetch } = useArtifacts(DEFAULT_PROGRAM_ID, {
+  // Use programId from URL, fallback to default if not provided
+  const activeProgramId = programId || '00000000-0000-0000-0000-000000000001'
+
+  const { data: artifacts = [], isLoading, refetch } = useArtifacts(activeProgramId, {
     status: statusFilter || undefined,
   })
 
@@ -28,7 +29,7 @@ export function ArtifactsPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="mb-2">
             <Link
-              to={`/programs/${DEFAULT_PROGRAM_ID}`}
+              to={`/programs/${activeProgramId}`}
               className="inline-flex items-center text-sm text-gray-600 hover:text-gray-900"
             >
               <ArrowLeftIcon className="h-4 w-4 mr-1" />
@@ -57,7 +58,7 @@ export function ArtifactsPage() {
         {/* Upload Section */}
         {showUploader && (
           <div className="mb-8">
-            <ArtifactUploader programId={DEFAULT_PROGRAM_ID} onUploadSuccess={handleUploadSuccess} />
+            <ArtifactUploader programId={activeProgramId} onUploadSuccess={handleUploadSuccess} />
           </div>
         )}
 
@@ -117,7 +118,7 @@ export function ArtifactsPage() {
         </div>
 
         {/* Artifacts List */}
-        <ArtifactList artifacts={artifacts} programId={DEFAULT_PROGRAM_ID} isLoading={isLoading} />
+        <ArtifactList artifacts={artifacts} programId={activeProgramId} isLoading={isLoading} />
       </div>
     </div>
   )

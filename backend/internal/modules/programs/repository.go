@@ -59,7 +59,7 @@ func (r *Repository) ListProgramsWithStats(ctx context.Context) ([]ProgramWithSt
 	}
 	defer rows.Close()
 
-	var programs []ProgramWithStats
+	programs := make([]ProgramWithStats, 0)
 	for rows.Next() {
 		var p ProgramWithStats
 		err := rows.Scan(

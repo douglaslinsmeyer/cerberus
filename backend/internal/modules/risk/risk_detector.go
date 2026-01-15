@@ -329,3 +329,244 @@ func (d *RiskDetector) AnalyzeDependencyRisk(ctx context.Context, programID uuid
 
 	return nil
 }
+
+// EnrichExistingRisks detects when new insights are related to existing risks and creates enrichments
+func (d *RiskDetector) EnrichExistingRisks(ctx context.Context, insights []ArtifactInsight) error {
+	for _, insight := range insights {
+		// Get active risks for this program (status: open or monitoring)
+		risks, err := d.getActiveRisks(ctx, insight.ProgramID)
+		if err != nil {
+			return fmt.Errorf("failed to get active risks: %w", err)
+		}
+
+		// For each risk, calculate match score
+		for _, risk := range risks {
+			matchScore, matchMethod := d.calculateMatchScore(insight, risk)
+
+			// Only create enrichment if match score exceeds threshold
+			if matchScore < 0.5 {
+				continue
+			}
+
+			// Determine enrichment type based on insight type
+			enrichmentType := determineEnrichmentType(insight.InsightType)
+
+			// Create enrichment record
+			enrichment := &RiskEnrichment{
+				EnrichmentID:    uuid.New(),
+				RiskID:          risk.RiskID,
+				ArtifactID:      insight.ArtifactID,
+				SourceInsightID: uuid.NullUUID{UUID: insight.InsightID, Valid: true},
+				EnrichmentType:  enrichmentType,
+				Title:           insight.Title,
+				Content:         insight.Description,
+				MatchScore:      matchScore,
+				MatchMethod:     matchMethod,
+				CreatedAt:       time.Now(),
+			}
+
+			// Save enrichment
+			err = d.repo.CreateEnrichment(ctx, enrichment)
+			if err != nil {
+				// Log error but continue processing other insights
+				fmt.Printf("Warning: failed to create enrichment: %v\n", err)
+				continue
+			}
+		}
+	}
+
+	return nil
+}
+
+// getActiveRisks retrieves risks that are open or monitoring status
+func (d *RiskDetector) getActiveRisks(ctx context.Context, programID uuid.UUID) ([]Risk, error) {
+	// Get open risks
+	openFilter := RiskFilterRequest{
+		ProgramID: programID,
+		Status:    "open",
+		Limit:     100, // Limit to recent risks
+	}
+	openRisks, err := d.repo.ListRisks(ctx, openFilter)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get monitoring risks
+	monitoringFilter := RiskFilterRequest{
+		ProgramID: programID,
+		Status:    "monitoring",
+		Limit:     100,
+	}
+	monitoringRisks, err := d.repo.ListRisks(ctx, monitoringFilter)
+	if err != nil {
+		return nil, err
+	}
+
+	// Combine results
+	return append(openRisks, monitoringRisks...), nil
+}
+
+// calculateMatchScore determines how well an insight matches a risk
+func (d *RiskDetector) calculateMatchScore(insight ArtifactInsight, risk Risk) (float64, string) {
+	var totalScore float64
+	var method string
+
+	// Category alignment score (0.4 weight)
+	categoryScore := d.calculateCategoryScore(insight, risk)
+	totalScore += categoryScore * 0.4
+
+	// Severity alignment score (0.3 weight)
+	severityScore := d.calculateSeverityScore(insight, risk)
+	totalScore += severityScore * 0.3
+
+	// Title/description similarity (0.3 weight)
+	similarityScore := d.calculateTextSimilarity(insight, risk)
+	totalScore += similarityScore * 0.3
+
+	// Determine primary match method
+	if categoryScore > 0.7 {
+		method = "category_match"
+	} else if similarityScore > 0.5 {
+		method = "text_similarity"
+	} else {
+		method = "composite"
+	}
+
+	return totalScore, method
+}
+
+// calculateCategoryScore checks if insight type maps to risk category
+func (d *RiskDetector) calculateCategoryScore(insight ArtifactInsight, risk Risk) float64 {
+	insightCategory := mapInsightToRiskCategory(insight.InsightType)
+
+	if strings.ToLower(insightCategory) == strings.ToLower(risk.Category) {
+		return 1.0
+	}
+
+	// Partial matches
+	if insightCategory == "technical" && (risk.Category == "quality" || risk.Category == "compliance") {
+		return 0.6
+	}
+	if insightCategory == "schedule" && risk.Category == "resource" {
+		return 0.5
+	}
+
+	return 0.0
+}
+
+// calculateSeverityScore compares insight severity with risk severity
+func (d *RiskDetector) calculateSeverityScore(insight ArtifactInsight, risk Risk) float64 {
+	insightSev := strings.ToLower(insight.Severity)
+	riskSev := strings.ToLower(risk.Severity)
+
+	if insightSev == riskSev {
+		return 1.0
+	}
+
+	// Adjacent severity levels
+	severityOrder := []string{"low", "medium", "high", "critical"}
+	insightIdx := indexOf(severityOrder, insightSev)
+	riskIdx := indexOf(severityOrder, riskSev)
+
+	if insightIdx >= 0 && riskIdx >= 0 {
+		diff := abs(insightIdx - riskIdx)
+		if diff == 1 {
+			return 0.7
+		}
+		if diff == 2 {
+			return 0.4
+		}
+	}
+
+	return 0.0
+}
+
+// calculateTextSimilarity checks for keyword overlap in title/description
+func (d *RiskDetector) calculateTextSimilarity(insight ArtifactInsight, risk Risk) float64 {
+	// Simple keyword matching
+	insightText := strings.ToLower(insight.Title + " " + insight.Description)
+	riskText := strings.ToLower(risk.Title + " " + risk.Description)
+
+	// Extract keywords (words > 4 characters)
+	insightWords := extractKeywords(insightText)
+	riskWords := extractKeywords(riskText)
+
+	if len(insightWords) == 0 || len(riskWords) == 0 {
+		return 0.0
+	}
+
+	// Count common keywords
+	common := 0
+	for word := range insightWords {
+		if riskWords[word] {
+			common++
+		}
+	}
+
+	// Jaccard similarity
+	totalUnique := len(insightWords) + len(riskWords) - common
+	if totalUnique == 0 {
+		return 0.0
+	}
+
+	return float64(common) / float64(totalUnique)
+}
+
+// Helper functions
+
+func determineEnrichmentType(insightType string) string {
+	typeMap := map[string]string{
+		"risk":              "new_evidence",
+		"anomaly":           "new_evidence",
+		"action_required":   "status_change",
+		"concern":           "impact_update",
+		"deadline_miss":     "status_change",
+		"budget_overrun":    "impact_update",
+		"resource_shortage": "impact_update",
+		"quality_issue":     "new_evidence",
+		"dependency_risk":   "new_evidence",
+		"compliance_issue":  "new_evidence",
+	}
+
+	if enrichType, ok := typeMap[insightType]; ok {
+		return enrichType
+	}
+	return "new_evidence"
+}
+
+func extractKeywords(text string) map[string]bool {
+	words := strings.Fields(text)
+	keywords := make(map[string]bool)
+
+	// Common stop words to ignore
+	stopWords := map[string]bool{
+		"the": true, "and": true, "for": true, "that": true, "this": true,
+		"with": true, "from": true, "are": true, "was": true, "has": true,
+		"have": true, "been": true, "will": true, "would": true, "should": true,
+	}
+
+	for _, word := range words {
+		word = strings.ToLower(strings.Trim(word, ".,!?;:"))
+		if len(word) > 4 && !stopWords[word] {
+			keywords[word] = true
+		}
+	}
+
+	return keywords
+}
+
+func indexOf(slice []string, value string) int {
+	for i, v := range slice {
+		if v == value {
+			return i
+		}
+	}
+	return -1
+}
+
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
+}

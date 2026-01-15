@@ -11,9 +11,11 @@ import {
   useUnlinkArtifact,
   useAddMessage,
   useCreateThread,
+  useEnrichments,
 } from '../hooks/useRisks'
 import { ConversationThread } from '../components/ConversationThread'
 import { ArtifactLinker } from '../components/ArtifactLinker'
+import { RiskEnrichmentTimeline } from '../components/RiskEnrichmentTimeline'
 import { format } from 'date-fns'
 
 export function RiskDetailPage() {
@@ -23,6 +25,7 @@ export function RiskDetailPage() {
   const { data: mitigations = [], isLoading: mitigationsLoading } = useMitigations(programId || '', riskId || '')
   const { data: linkedArtifacts = [], isLoading: artifactsLoading } = useLinkedArtifacts(programId || '', riskId || '')
   const { data: threads = [], isLoading: threadsLoading } = useConversations(programId || '', riskId || '')
+  const { data: enrichments = [] } = useEnrichments(programId || '', riskId || '')
 
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null)
   const [showNewThreadDialog, setShowNewThreadDialog] = useState(false)
@@ -192,6 +195,15 @@ export function RiskDetailPage() {
                 )}
               </div>
             </div>
+
+            {/* Enrichment Timeline */}
+            {enrichments.length > 0 && (
+              <RiskEnrichmentTimeline
+                riskId={riskId || ''}
+                programId={programId || ''}
+                enrichments={enrichments}
+              />
+            )}
 
             {/* Mitigations */}
             <div className="bg-white rounded-lg shadow p-6">

@@ -158,6 +158,15 @@ func (e *DuplicateError) Error() string {
 	return fmt.Sprintf("duplicate artifact exists (status: %s)", e.Status)
 }
 
+// EncryptedPDFError indicates a PDF is password-protected
+type EncryptedPDFError struct {
+	Message string
+}
+
+func (e *EncryptedPDFError) Error() string {
+	return e.Message
+}
+
 // DuplicateCheck contains results of duplicate checking
 type DuplicateCheck struct {
 	Exists      bool

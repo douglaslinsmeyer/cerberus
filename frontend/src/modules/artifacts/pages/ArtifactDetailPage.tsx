@@ -4,18 +4,20 @@ import { useArtifactMetadata, useDeleteArtifact, useReanalyzeArtifact } from '..
 import { MetadataView } from '../components/MetadataView'
 import { artifactsApi } from '@/services/api'
 
-const DEFAULT_PROGRAM_ID = '00000000-0000-0000-0000-000000000001'
-
 export function ArtifactDetailPage() {
-  const { artifactId } = useParams<{ artifactId: string }>()
-  const { data: artifact, isLoading, error } = useArtifactMetadata(DEFAULT_PROGRAM_ID, artifactId!)
-  const deleteMutation = useDeleteArtifact(DEFAULT_PROGRAM_ID)
-  const reanalyzeMutation = useReanalyzeArtifact(DEFAULT_PROGRAM_ID)
+  const { programId, artifactId } = useParams<{ programId: string; artifactId: string }>()
+
+  // Use programId from URL, fallback to default if not provided
+  const activeProgramId = programId || '00000000-0000-0000-0000-000000000001'
+
+  const { data: artifact, isLoading, error } = useArtifactMetadata(activeProgramId, artifactId!)
+  const deleteMutation = useDeleteArtifact(activeProgramId)
+  const reanalyzeMutation = useReanalyzeArtifact(activeProgramId)
 
   const handleDownload = async () => {
     if (!artifactId) return
     try {
-      const blob = await artifactsApi.download(DEFAULT_PROGRAM_ID, artifactId)
+      const blob = await artifactsApi.download(activeProgramId, artifactId)
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -31,7 +33,7 @@ export function ArtifactDetailPage() {
     if (!artifactId) return
     if (confirm('Are you sure you want to delete this artifact?')) {
       await deleteMutation.mutateAsync(artifactId)
-      window.location.href = `/programs/${DEFAULT_PROGRAM_ID}/artifacts`
+      window.location.href = `/programs/${activeProgramId}/artifacts`
     }
   }
 
@@ -53,7 +55,7 @@ export function ArtifactDetailPage() {
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <h2 className="text-2xl font-bold text-gray-900 mb-2">Artifact Not Found</h2>
-          <Link to={`/programs/${DEFAULT_PROGRAM_ID}/artifacts`} className="text-blue-600 hover:text-blue-700">
+          <Link to={`/programs/${activeProgramId}/artifacts`} className="text-blue-600 hover:text-blue-700">
             ← Back to Artifacts
           </Link>
         </div>
@@ -75,7 +77,7 @@ export function ArtifactDetailPage() {
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
               <Link
-                to={`/programs/${DEFAULT_PROGRAM_ID}/artifacts`}
+                to={`/programs/${activeProgramId}/artifacts`}
                 className="text-gray-400 hover:text-gray-600"
               >
                 <ArrowLeftIcon className="h-6 w-6" />

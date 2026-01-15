@@ -314,7 +314,7 @@ func (r *Repository) GetUserPrograms(ctx context.Context, userID uuid.UUID) ([]P
 	}
 	defer rows.Close()
 
-	var programs []ProgramAccess
+	programs := make([]ProgramAccess, 0)
 	for rows.Next() {
 		var pa ProgramAccess
 		err := rows.Scan(

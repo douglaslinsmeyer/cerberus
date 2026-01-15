@@ -3,172 +3,201 @@ package storage
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
-	"mime/multipart"
-	"net/http"
+	"path/filepath"
+	"strings"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
-// RustFSClient implements Storage interface for RustFS service
+// RustFSClient implements Storage interface using MinIO Go client for S3-compatible RustFS
 type RustFSClient struct {
-	baseURL    string
-	httpClient *http.Client
+	client     *minio.Client
+	bucketName string
+	endpoint   string
 }
 
-// NewRustFSClient creates a new RustFS storage client
+// RustFSConfig holds configuration for RustFS client
+type RustFSConfig struct {
+	Endpoint        string
+	AccessKeyID     string
+	SecretAccessKey string
+	BucketName      string
+	UseSSL          bool
+}
+
+// NewRustFSClient creates a new RustFS storage client using S3 API
 func NewRustFSClient(endpoint string) *RustFSClient {
-	return &RustFSClient{
-		baseURL: endpoint,
-		httpClient: &http.Client{
-			Timeout: 60 * time.Second,
-		},
+	// Default configuration for development
+	config := RustFSConfig{
+		Endpoint:        endpoint,
+		AccessKeyID:     "minioadmin",
+		SecretAccessKey: "minioadmin",
+		BucketName:      "cerberus-artifacts",
+		UseSSL:          false,
 	}
+
+	return NewRustFSClientWithConfig(config)
 }
 
-// Upload stores a file in RustFS
-func (c *RustFSClient) Upload(ctx context.Context, filename string, data []byte) (*FileInfo, error) {
-	// Create multipart form
-	var buf bytes.Buffer
-	writer := multipart.NewWriter(&buf)
+// NewRustFSClientWithConfig creates a new RustFS client with custom configuration
+func NewRustFSClientWithConfig(config RustFSConfig) *RustFSClient {
+	// Remove http:// or https:// prefix if present
+	endpoint := strings.TrimPrefix(config.Endpoint, "http://")
+	endpoint = strings.TrimPrefix(endpoint, "https://")
 
-	// Add file field
-	part, err := writer.CreateFormFile("file", filename)
+	// Initialize MinIO client for S3-compatible storage
+	client, err := minio.New(endpoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(config.AccessKeyID, config.SecretAccessKey, ""),
+		Secure: config.UseSSL,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to create form file: %w", err)
+		// Log error but don't fail - will fail on first operation
+		fmt.Printf("Warning: Failed to initialize S3 client: %v\n", err)
 	}
 
-	if _, err := part.Write(data); err != nil {
-		return nil, fmt.Errorf("failed to write file data: %w", err)
+	rustfs := &RustFSClient{
+		client:     client,
+		bucketName: config.BucketName,
+		endpoint:   config.Endpoint,
 	}
 
-	if err := writer.Close(); err != nil {
-		return nil, fmt.Errorf("failed to close multipart writer: %w", err)
-	}
+	// Try to create bucket if it doesn't exist (best effort)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	rustfs.ensureBucket(ctx)
 
-	// Create request
-	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/upload", &buf)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-
-	// Send request
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to upload file: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("upload failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	// Parse response
-	var uploadResp struct {
-		Success bool     `json:"success"`
-		File    FileInfo `json:"file"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&uploadResp); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	if !uploadResp.Success {
-		return nil, fmt.Errorf("upload failed: success=false")
-	}
-
-	uploadResp.File.UploadedAt = time.Now()
-	return &uploadResp.File, nil
+	return rustfs
 }
 
-// Download retrieves a file from RustFS
-func (c *RustFSClient) Download(ctx context.Context, fileID string) ([]byte, error) {
-	url := fmt.Sprintf("%s/files/%s", c.baseURL, fileID)
-
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+// ensureBucket creates the bucket if it doesn't exist
+func (c *RustFSClient) ensureBucket(ctx context.Context) error {
+	// Check if bucket exists
+	exists, err := c.client.BucketExists(ctx, c.bucketName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return fmt.Errorf("failed to check bucket existence: %w", err)
 	}
 
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to download file: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("file not found: %s", fileID)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("download failed with status %d", resp.StatusCode)
-	}
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read file data: %w", err)
-	}
-
-	return data, nil
-}
-
-// Delete removes a file from RustFS
-func (c *RustFSClient) Delete(ctx context.Context, fileID string) error {
-	url := fmt.Sprintf("%s/files/%s", c.baseURL, fileID)
-
-	req, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to delete file: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusNotFound {
-		return fmt.Errorf("file not found: %s", fileID)
-	}
-
-	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("delete failed with status %d", resp.StatusCode)
+	if !exists {
+		// Create bucket
+		err = c.client.MakeBucket(ctx, c.bucketName, minio.MakeBucketOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to create bucket: %w", err)
+		}
+		fmt.Printf("Created bucket: %s\n", c.bucketName)
 	}
 
 	return nil
 }
 
-// GetInfo retrieves file metadata from RustFS
+// Upload stores a file in RustFS using S3 API
+func (c *RustFSClient) Upload(ctx context.Context, filename string, data []byte) (*FileInfo, error) {
+	// Generate unique file ID
+	fileID := uuid.New().String()
+
+	// Determine content type from file extension
+	contentType := "application/octet-stream"
+	ext := strings.ToLower(filepath.Ext(filename))
+	switch ext {
+	case ".pdf":
+		contentType = "application/pdf"
+	case ".txt":
+		contentType = "text/plain"
+	case ".json":
+		contentType = "application/json"
+	case ".csv":
+		contentType = "text/csv"
+	case ".xlsx":
+		contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+	case ".xls":
+		contentType = "application/vnd.ms-excel"
+	}
+
+	// Create reader from data
+	reader := bytes.NewReader(data)
+	fileSize := int64(len(data))
+
+	// Upload to S3-compatible storage
+	uploadInfo, err := c.client.PutObject(
+		ctx,
+		c.bucketName,
+		fileID,
+		reader,
+		fileSize,
+		minio.PutObjectOptions{
+			ContentType: contentType,
+			UserMetadata: map[string]string{
+				"original-filename": filename,
+			},
+		},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to upload to S3: %w", err)
+	}
+
+	// Return file info
+	return &FileInfo{
+		ID:          fileID,
+		Filename:    filename,
+		Path:        fmt.Sprintf("artifacts/%s", fileID),
+		Size:        fileSize,
+		ContentHash: uploadInfo.ETag,
+		UploadedAt:  time.Now(),
+	}, nil
+}
+
+// Download retrieves a file from RustFS using S3 API
+func (c *RustFSClient) Download(ctx context.Context, fileID string) ([]byte, error) {
+	// Get object from S3
+	object, err := c.client.GetObject(ctx, c.bucketName, fileID, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get object: %w", err)
+	}
+	defer object.Close()
+
+	// Read all data
+	data, err := io.ReadAll(object)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read object data: %w", err)
+	}
+
+	return data, nil
+}
+
+// Delete removes a file from RustFS using S3 API
+func (c *RustFSClient) Delete(ctx context.Context, fileID string) error {
+	err := c.client.RemoveObject(ctx, c.bucketName, fileID, minio.RemoveObjectOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to delete object: %w", err)
+	}
+
+	return nil
+}
+
+// GetInfo retrieves file metadata from RustFS using S3 API
 func (c *RustFSClient) GetInfo(ctx context.Context, fileID string) (*FileInfo, error) {
-	url := fmt.Sprintf("%s/files/%s/info", c.baseURL, fileID)
-
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	// Get object stat
+	stat, err := c.client.StatObject(ctx, c.bucketName, fileID, minio.StatObjectOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, fmt.Errorf("failed to stat object: %w", err)
 	}
 
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get file info: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("file not found: %s", fileID)
+	// Extract original filename from metadata
+	filename := stat.UserMetadata["Original-Filename"]
+	if filename == "" {
+		filename = fileID
 	}
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("get info failed with status %d", resp.StatusCode)
-	}
-
-	var info FileInfo
-	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	return &info, nil
+	return &FileInfo{
+		ID:          fileID,
+		Filename:    filename,
+		Path:        fmt.Sprintf("artifacts/%s", fileID),
+		Size:        stat.Size,
+		ContentHash: stat.ETag,
+		UploadedAt:  stat.LastModified,
+	}, nil
 }

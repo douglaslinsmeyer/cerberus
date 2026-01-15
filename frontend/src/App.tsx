@@ -10,6 +10,9 @@ import { InvoiceDetailPage } from './modules/financial/pages/InvoiceDetailPage'
 import { RiskDashboard } from './modules/risk/pages/RiskDashboard'
 import { RiskListPage } from './modules/risk/pages/RiskListPage'
 import { RiskDetailPage } from './modules/risk/pages/RiskDetailPage'
+import { StakeholdersPage } from './modules/stakeholders/pages/StakeholdersPage'
+import { StakeholderDetailPage } from './modules/stakeholders/pages/StakeholderDetailPage'
+import { StakeholderSuggestionsPage } from './modules/stakeholders/pages/StakeholderSuggestionsPage'
 
 function App() {
   return (
@@ -34,6 +37,11 @@ function App() {
         <Route path="/programs/:programId/risks" element={<RiskDashboard />} />
         <Route path="/programs/:programId/risks/list" element={<RiskListPage />} />
         <Route path="/programs/:programId/risks/:riskId" element={<RiskDetailPage />} />
+
+        {/* Stakeholders Module */}
+        <Route path="/programs/:programId/stakeholders" element={<StakeholdersPage />} />
+        <Route path="/programs/:programId/stakeholders/suggestions" element={<StakeholderSuggestionsPage />} />
+        <Route path="/programs/:programId/stakeholders/:stakeholderId" element={<StakeholderDetailPage />} />
 
         <Route path="*" element={<NotFoundPage />} />
       </Routes>

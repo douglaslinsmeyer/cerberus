@@ -533,6 +533,68 @@ func (a *InvoiceAnalyzer) CalculateVariances(ctx context.Context, invoice *Invoi
 	return result, nil
 }
 
+// FindDuplicateInvoices searches for existing invoices that match business identifiers
+// Returns candidates that might be duplicates from replaced artifacts
+func (a *InvoiceAnalyzer) FindDuplicateInvoices(ctx context.Context, invoice *Invoice) ([]Invoice, error) {
+	// Only check if we have enough information to identify duplicates
+	if invoice.VendorName == "" {
+		return []Invoice{}, nil
+	}
+
+	invoiceNumber := ""
+	if invoice.InvoiceNumber.Valid {
+		invoiceNumber = invoice.InvoiceNumber.String
+	}
+
+	// Query for potential duplicates
+	candidates, err := a.repo.GetInvoicesByIdentifier(
+		ctx,
+		invoice.ProgramID,
+		invoice.VendorName,
+		invoiceNumber,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find duplicate invoices: %w", err)
+	}
+
+	// Filter out the current invoice if it's already in DB
+	var duplicates []Invoice
+	for _, candidate := range candidates {
+		if candidate.InvoiceID != invoice.InvoiceID {
+			duplicates = append(duplicates, candidate)
+		}
+	}
+
+	return duplicates, nil
+}
+
+// ShouldReplacePreviousInvoice determines if an old invoice should be replaced
+// Checks if the old invoice is linked to a deleted artifact (indicating replacement)
+func (a *InvoiceAnalyzer) ShouldReplacePreviousInvoice(ctx context.Context, oldInvoice *Invoice) (bool, error) {
+	// If no artifact link, it's a manual invoice - don't auto-delete
+	if !oldInvoice.ArtifactID.Valid {
+		return false, nil
+	}
+
+	// Check if the linked artifact is deleted
+	query := `
+		SELECT deleted_at FROM artifacts WHERE artifact_id = $1
+	`
+
+	var deletedAt sql.NullTime
+	err := a.repo.(*Repository).db.QueryRowContext(ctx, query, oldInvoice.ArtifactID.UUID).Scan(&deletedAt)
+	if err == sql.ErrNoRows {
+		// Artifact doesn't exist - treat as deleted
+		return true, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to check artifact deletion: %w", err)
+	}
+
+	// If artifact is soft-deleted, invoice should be replaced
+	return deletedAt.Valid, nil
+}
+
 // ProcessInvoice performs complete invoice analysis: extract + validate + detect variances
 func (a *InvoiceAnalyzer) ProcessInvoice(ctx context.Context, artifactID uuid.UUID, artifactContent string, programID uuid.UUID, programContext *ai.ProgramContext) error {
 	// Extract invoice data
@@ -544,9 +606,43 @@ func (a *InvoiceAnalyzer) ProcessInvoice(ctx context.Context, artifactID uuid.UU
 	// Link to artifact
 	invoice.ArtifactID = uuid.NullUUID{UUID: artifactID, Valid: true}
 
-	// Save invoice to database
+	// DUPLICATE DETECTION: Check if this invoice replaces an existing one
+	duplicates, err := a.FindDuplicateInvoices(ctx, invoice)
+	if err != nil {
+		// Log warning but don't fail processing
+		fmt.Printf("Warning: Failed to check for duplicate invoices: %v\n", err)
+	}
+
+	// Handle duplicates from replaced artifacts
+	var replacedInvoiceIDs []uuid.UUID
+	for _, dup := range duplicates {
+		shouldReplace, err := a.ShouldReplacePreviousInvoice(ctx, &dup)
+		if err != nil {
+			fmt.Printf("Warning: Failed to check if invoice should be replaced: %v\n", err)
+			continue
+		}
+
+		if shouldReplace {
+			replacedInvoiceIDs = append(replacedInvoiceIDs, dup.InvoiceID)
+			fmt.Printf("Detected replaced invoice: %s (artifact replaced)\n", dup.InvoiceID)
+		}
+	}
+
+	// Save new invoice to database
 	if err := a.repo.CreateInvoice(ctx, invoice); err != nil {
 		return fmt.Errorf("failed to save invoice: %w", err)
+	}
+
+	// Soft-delete old invoices and link to new one
+	for _, oldInvoiceID := range replacedInvoiceIDs {
+		reason := fmt.Sprintf("Replaced by invoice %s due to artifact re-upload", invoice.InvoiceID)
+		err := a.repo.SoftDeleteInvoiceWithReplacement(ctx, oldInvoiceID, invoice.InvoiceID, reason)
+		if err != nil {
+			// Log warning but continue processing
+			fmt.Printf("Warning: Failed to mark old invoice as replaced: %v\n", err)
+		} else {
+			fmt.Printf("Soft-deleted replaced invoice: %s\n", oldInvoiceID)
+		}
 	}
 
 	// Save line items

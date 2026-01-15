@@ -20,6 +20,7 @@ import (
 
 // RepositoryInterface defines methods for artifact data access
 type RepositoryInterface interface {
+	// Core CRUD operations
 	Create(ctx context.Context, artifact *Artifact) error
 	GetByID(ctx context.Context, artifactID uuid.UUID) (*Artifact, error)
 	ListByProgram(ctx context.Context, programID uuid.UUID, limit, offset int) ([]Artifact, error)
@@ -35,6 +36,51 @@ type RepositoryInterface interface {
 	SaveInsights(ctx context.Context, insights []Insight) error
 	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
 	QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error)
+
+	// Context Graph: Semantic similarity
+	FindSemanticallyRelatedArtifacts(ctx context.Context, artifactID, programID uuid.UUID, limit int) ([]ArtifactCandidate, error)
+
+	// Context Graph: Entity queries
+	FindArtifactsWithSharedEntities(ctx context.Context, targetArtifactID, programID uuid.UUID, personIDs []uuid.UUID, limit int) ([]ArtifactCandidate, error)
+	GetPersonRelationships(ctx context.Context, personID, programID uuid.UUID) ([]PersonRelationship, error)
+	GetPersonsByArtifact(ctx context.Context, artifactID uuid.UUID) ([]Person, error)
+	GetPersonIDsByArtifact(ctx context.Context, artifactID uuid.UUID) ([]uuid.UUID, error)
+	UpsertEntityGraphEdge(ctx context.Context, programID, person1ID, person2ID, artifactID uuid.UUID) error
+	FindArtifactsWithEntityOverlap(ctx context.Context, targetArtifactID, programID uuid.UUID, personIDs []uuid.UUID, limit int) ([]ArtifactWithEntityOverlap, error)
+	GetKeyPeopleByProgram(ctx context.Context, programID uuid.UUID, limit int) ([]PersonContext, error)
+	FindPeopleByNamePattern(ctx context.Context, programID uuid.UUID, namePattern string) ([]Person, error)
+	GetProgramEntityGraph(ctx context.Context, programID uuid.UUID, minCoOccurrences int) ([]PersonRelationship, error)
+	CountUniquePeopleInProgram(ctx context.Context, programID uuid.UUID) (int, error)
+	CountEntityGraphEdges(ctx context.Context, programID uuid.UUID) (int, error)
+	GetAverageCoOccurrences(ctx context.Context, programID uuid.UUID) (float64, error)
+	GetMostConnectedPerson(ctx context.Context, programID uuid.UUID) (*Person, error)
+
+	// Context Graph: Temporal queries
+	FindTemporallyRelatedArtifacts(ctx context.Context, targetArtifactID, programID uuid.UUID, targetTime time.Time, limit int) ([]ArtifactCandidate, error)
+	GetArtifactsInTimeRange(ctx context.Context, programID uuid.UUID, startDate, endDate time.Time) ([]Artifact, error)
+	GetArtifactsByProgram(ctx context.Context, programID uuid.UUID) ([]Artifact, error)
+	GetSummaryByArtifact(ctx context.Context, artifactID uuid.UUID) (*ArtifactSummary, error)
+	SaveTemporalSequence(ctx context.Context, sequence *ArtifactSequence) error
+	GetTemporalSequencesByProgram(ctx context.Context, programID uuid.UUID) ([]ArtifactSequence, error)
+
+	// Context Graph: Fact aggregation
+	GetFactsByArtifacts(ctx context.Context, artifactIDs []uuid.UUID) ([]Fact, error)
+	GetArtifactFilename(ctx context.Context, artifactID uuid.UUID) (string, error)
+	GetArtifactByID(ctx context.Context, artifactID uuid.UUID) (*Artifact, error)
+	FindFactsByKey(ctx context.Context, programID uuid.UUID, factKey string) ([]Fact, error)
+	CountFactsInProgram(ctx context.Context, programID uuid.UUID) (int, error)
+	CountFactsByType(ctx context.Context, programID uuid.UUID) (map[string]int, error)
+	GetAllFactsInProgram(ctx context.Context, programID uuid.UUID) ([]Fact, error)
+
+	// Context Graph: Cache management
+	GetContextCacheEntry(ctx context.Context, artifactID uuid.UUID) (*ContextCacheEntry, error)
+	UpsertContextCacheEntry(ctx context.Context, entry *ContextCacheEntry) error
+	DeleteContextCache(ctx context.Context, artifactID uuid.UUID) error
+	CleanupExpiredContextCache(ctx context.Context) (int, error)
+	GetArtifactIDsByProgram(ctx context.Context, programID uuid.UUID) ([]uuid.UUID, error)
+	GetRecentArtifactsWithoutCache(ctx context.Context, programID uuid.UUID, limit int) ([]Artifact, error)
+	RefreshContextSummaryView(ctx context.Context) error
+	GetContextCacheStats(ctx context.Context) (map[string]interface{}, error)
 }
 
 // DBExecutor defines methods for direct database access (for metadata clearing)
@@ -121,14 +167,25 @@ func (s *Service) UploadArtifact(ctx context.Context, req UploadRequest) (uuid.U
 	// Upload file to storage
 	fileInfo, err := s.storage.Upload(ctx, req.Filename, req.Data)
 	if err != nil {
+		fmt.Printf("Storage upload failed: %v\n", err)
 		return uuid.Nil, fmt.Errorf("failed to upload file to storage: %w", err)
 	}
+	fmt.Printf("Storage upload successful: fileID=%s, size=%d\n", fileInfo.ID, fileInfo.Size)
 
 	// Extract text content
 	rawContent, err := s.extractors.Extract(ctx, req.MimeType, req.Data)
 	var chunks []Chunk
 
 	if err != nil {
+		// Check if PDF is encrypted/password-protected - reject these files
+		if containsString(err.Error(), "encrypted PDF") || containsString(err.Error(), "invalid password") {
+			// Clean up uploaded file
+			_ = s.storage.Delete(ctx, fileInfo.ID)
+			return uuid.Nil, &EncryptedPDFError{
+				Message: "This PDF is password-protected and cannot be processed. Please remove the password and upload again.",
+			}
+		}
+
 		// Check if this is a "no text content" error (likely scanned PDF)
 		if containsString(err.Error(), "no text content") {
 			// Allow upload but mark for manual review

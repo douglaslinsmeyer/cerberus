@@ -121,12 +121,82 @@ type ConversationMessage struct {
 	DeletedAt        sql.NullTime  `json:"deleted_at,omitempty"`
 }
 
+// Enrichment represents a unique, reusable enrichment from document analysis
+type Enrichment struct {
+	EnrichmentID    uuid.UUID     `json:"enrichment_id"`
+	ArtifactID      uuid.UUID     `json:"artifact_id"`
+	SourceInsightID uuid.NullUUID `json:"source_insight_id,omitempty"`
+	EnrichmentType  string        `json:"enrichment_type"`
+	Title           string        `json:"title"`
+	Content         string        `json:"content"`
+	CreatedAt       time.Time     `json:"created_at"`
+	UpdatedAt       time.Time     `json:"updated_at"`
+	DeletedAt       sql.NullTime  `json:"deleted_at,omitempty"`
+}
+
+// RiskEnrichmentLink represents a link between a risk and an enrichment
+type RiskEnrichmentLink struct {
+	LinkID       uuid.UUID     `json:"link_id"`
+	RiskID       uuid.UUID     `json:"risk_id"`
+	EnrichmentID uuid.UUID     `json:"enrichment_id"`
+	MatchScore   float64       `json:"match_score"`
+	MatchMethod  string        `json:"match_method"`
+	IsRelevant   sql.NullBool  `json:"is_relevant,omitempty"`
+	ReviewedBy   uuid.NullUUID `json:"reviewed_by,omitempty"`
+	ReviewedAt   sql.NullTime  `json:"reviewed_at,omitempty"`
+	LinkedAt     time.Time     `json:"linked_at"`
+}
+
+// RiskEnrichmentWithMetadata combines enrichment with link metadata and additional context
+type RiskEnrichmentWithMetadata struct {
+	EnrichmentID    uuid.UUID     `json:"enrichment_id"`
+	ArtifactID      uuid.UUID     `json:"artifact_id"`
+	SourceInsightID uuid.NullUUID `json:"source_insight_id,omitempty"`
+	EnrichmentType  string        `json:"enrichment_type"`
+	Title           string        `json:"title"`
+	Content         string        `json:"content"`
+	CreatedAt       time.Time     `json:"created_at"`
+	UpdatedAt       time.Time     `json:"updated_at"`
+
+	// Link-specific fields
+	LinkID       uuid.UUID     `json:"link_id"`
+	MatchScore   float64       `json:"match_score"`
+	MatchMethod  string        `json:"match_method"`
+	IsRelevant   sql.NullBool  `json:"is_relevant,omitempty"`
+	ReviewedBy   uuid.NullUUID `json:"reviewed_by,omitempty"`
+	ReviewedAt   sql.NullTime  `json:"reviewed_at,omitempty"`
+
+	// Additional context
+	ArtifactFilename string `json:"artifact_filename"`
+	RelatedRiskCount int    `json:"related_risk_count"`
+}
+
+// RiskEnrichment represents an automatic enrichment to a risk from new artifact analysis
+// DEPRECATED: Kept for backward compatibility during migration, use RiskEnrichmentWithMetadata instead
+type RiskEnrichment struct {
+	EnrichmentID     uuid.UUID       `json:"enrichment_id"`
+	RiskID           uuid.UUID       `json:"risk_id"`
+	ArtifactID       uuid.UUID       `json:"artifact_id"`
+	SourceInsightID  uuid.NullUUID   `json:"source_insight_id,omitempty"`
+	EnrichmentType   string          `json:"enrichment_type"`
+	Title            string          `json:"title"`
+	Content          string          `json:"content"`
+	MatchScore       float64         `json:"match_score"`
+	MatchMethod      string          `json:"match_method"`
+	IsRelevant       sql.NullBool    `json:"is_relevant,omitempty"`
+	ReviewedBy       uuid.NullUUID   `json:"reviewed_by,omitempty"`
+	ReviewedAt       sql.NullTime    `json:"reviewed_at,omitempty"`
+	CreatedAt        time.Time       `json:"created_at"`
+	DeletedAt        sql.NullTime    `json:"deleted_at,omitempty"`
+}
+
 // RiskWithMetadata combines risk with its related entities
 type RiskWithMetadata struct {
 	Risk
-	Mitigations    []RiskMitigation     `json:"mitigations,omitempty"`
-	LinkedArtifacts []RiskArtifactLink  `json:"linked_artifacts,omitempty"`
-	Threads        []ConversationThread `json:"threads,omitempty"`
+	Mitigations     []RiskMitigation            `json:"mitigations,omitempty"`
+	LinkedArtifacts []RiskArtifactLink          `json:"linked_artifacts,omitempty"`
+	Threads         []ConversationThread        `json:"threads,omitempty"`
+	Enrichments     []RiskEnrichmentWithMetadata `json:"enrichments,omitempty"`
 }
 
 // ThreadWithMessages combines thread with its messages
@@ -237,4 +307,10 @@ type DismissSuggestionRequest struct {
 	SuggestionID uuid.UUID `json:"suggestion_id"`
 	DismissedBy  uuid.UUID `json:"dismissed_by"`
 	Reason       string    `json:"reason"`
+}
+
+// RiskListWithSuggestionsResponse represents a unified response containing both risks and suggestions
+type RiskListWithSuggestionsResponse struct {
+	Risks       []Risk          `json:"risks"`
+	Suggestions []RiskSuggestion `json:"suggestions"`
 }

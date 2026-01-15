@@ -78,7 +78,17 @@ func main() {
 
 	// Create artifacts repository and analyzer
 	artifactsRepo := artifacts.NewRepository(database)
-	aiAnalyzer := artifacts.NewAIAnalyzer(claudeClient, artifactsRepo)
+
+	// Initialize AI Analyzer with enriched context support
+	log.Println("Initializing AI Analyzer with enriched context graph support...")
+	aiAnalyzer, err := artifacts.InitializeAIAnalyzerWithContext(claudeClient, artifactsRepo, redisClient)
+	if err != nil {
+		log.Printf("Warning: Failed to initialize context graph, using basic analyzer: %v", err)
+		aiAnalyzer = artifacts.NewAIAnalyzer(claudeClient, artifactsRepo)
+	} else {
+		log.Println("✅ Enriched context graph system ENABLED")
+	}
+
 	embeddingsService := artifacts.NewEmbeddingsService(openaiKey, artifactsRepo)
 	ocrService := artifacts.NewOCRService(artifactsRepo, storageClient)
 
@@ -147,6 +157,14 @@ func main() {
 				log.Printf("Warning: Risk detection failed: %v", err)
 			} else {
 				log.Printf("Risk detection completed for artifact: %s", artifactID)
+			}
+
+			// Enrich existing risks with new insights
+			log.Printf("Checking for risk enrichment opportunities from %d insights...", len(insights))
+			if err := riskDetector.EnrichExistingRisks(ctx, insights); err != nil {
+				log.Printf("Warning: Risk enrichment failed: %v", err)
+			} else {
+				log.Printf("Risk enrichment check completed for artifact: %s", artifactID)
 			}
 		}
 
@@ -236,6 +254,14 @@ func main() {
 						} else {
 							log.Printf("Risk detection completed for artifact: %s", artifact.ArtifactID)
 						}
+
+						// Enrich existing risks with new insights
+						log.Printf("Checking for risk enrichment opportunities from %d insights...", len(insights))
+						if err := riskDetector.EnrichExistingRisks(ctx, insights); err != nil {
+							log.Printf("Warning: Risk enrichment failed: %v", err)
+						} else {
+							log.Printf("Risk enrichment check completed for artifact: %s", artifact.ArtifactID)
+						}
 					}
 
 					// Check if artifact is an invoice and process financially
@@ -245,7 +271,7 @@ func main() {
 						log.Printf("Artifact %s categorized as: %s", artifact.ArtifactID, category)
 
 						if category == "invoice" && updatedArtifact.RawContent.Valid {
-							log.Printf("Processing invoice: %s", artifact.ArtifactID)
+							log.Printf("Processing invoice artifact: %s (filename: %s)", artifact.ArtifactID, updatedArtifact.Filename)
 
 							programContext := &ai.ProgramContext{
 								ProgramName: "Default Program",
@@ -260,9 +286,9 @@ func main() {
 								programContext,
 							)
 							if err != nil {
-								log.Printf("Failed to process invoice %s: %v", artifact.ArtifactID, err)
+								log.Printf("ERROR: Failed to process invoice: %v", err)
 							} else {
-								log.Printf("Invoice processed successfully: %s", artifact.ArtifactID)
+								log.Printf("SUCCESS: Invoice processed for artifact: %s", artifact.ArtifactID)
 							}
 						}
 					}
@@ -334,7 +360,7 @@ func main() {
 
 				// Query for programs with recent insights
 				query := `
-					SELECT DISTINCT ai.program_id
+					SELECT DISTINCT a.program_id
 					FROM artifact_insights ai
 					INNER JOIN artifacts a ON ai.artifact_id = a.artifact_id
 					WHERE ai.extracted_at >= NOW() - INTERVAL '24 hours'
@@ -420,6 +446,14 @@ func main() {
 							log.Printf("Failed aggregate risk analysis for program %s: %v", programID, err)
 						} else {
 							log.Printf("Completed aggregate risk analysis for program %s", programID)
+						}
+
+						// Enrich existing risks with the insights
+						log.Printf("Checking for risk enrichment opportunities for program %s...", programID)
+						if err := riskDetector.EnrichExistingRisks(ctx, insights); err != nil {
+							log.Printf("Failed aggregate risk enrichment for program %s: %v", programID, err)
+						} else {
+							log.Printf("Completed aggregate risk enrichment for program %s", programID)
 						}
 					}
 				}

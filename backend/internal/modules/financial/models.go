@@ -67,6 +67,7 @@ type Invoice struct {
 	ApprovedAt          sql.NullTime    `json:"approved_at,omitempty"`
 	RejectedReason      sql.NullString  `json:"rejected_reason,omitempty"`
 	DeletedAt           sql.NullTime    `json:"deleted_at,omitempty"`
+	ReplacedByInvoiceID uuid.NullUUID   `json:"replaced_by_invoice_id,omitempty"`
 }
 
 // InvoiceLineItem represents a line item from an invoice

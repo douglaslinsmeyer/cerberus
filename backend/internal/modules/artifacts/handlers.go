@@ -76,6 +76,12 @@ func handleUpload(service *Service) http.HandlerFunc {
 		})
 
 		if err != nil {
+			// Check if encrypted PDF error
+			if encErr, ok := err.(*EncryptedPDFError); ok {
+				respondError(w, http.StatusBadRequest, encErr.Message)
+				return
+			}
+
 			// Check if duplicate error
 			if dupErr, ok := err.(*DuplicateError); ok {
 				w.Header().Set("Content-Type", "application/json")

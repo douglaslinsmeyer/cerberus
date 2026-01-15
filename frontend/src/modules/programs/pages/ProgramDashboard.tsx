@@ -12,10 +12,17 @@ import {
   ArrowPathIcon,
 } from '@heroicons/react/24/outline'
 import { useArtifacts } from '../../artifacts/hooks/useArtifacts'
+import { useStakeholders, useStakeholderSuggestions } from '../../stakeholders/hooks/useStakeholders'
 
 export function ProgramDashboard() {
   const { programId } = useParams<{ programId: string }>()
-  const { data: artifacts = [] } = useArtifacts(programId || '', {})
+  const { data: artifacts } = useArtifacts(programId || '', {})
+  const { data: stakeholders } = useStakeholders(programId || '', {})
+  const { data: suggestions } = useStakeholderSuggestions(programId || '')
+
+  const safeArtifacts = artifacts ?? []
+  const safeStakeholders = stakeholders ?? []
+  const safeSuggestions = suggestions ?? []
 
   // Hardcoded program data for Phase 2 (no program API yet)
   const program = {
@@ -35,7 +42,7 @@ export function ProgramDashboard() {
       link: `/programs/${programId}/artifacts`,
       status: 'active',
       color: 'bg-blue-500',
-      stats: `${artifacts.length} documents`,
+      stats: `${safeArtifacts.length} documents`,
     },
     {
       name: 'Financial',
@@ -68,10 +75,11 @@ export function ProgramDashboard() {
       name: 'Stakeholders',
       icon: UserGroupIcon,
       description: 'Stakeholder management',
-      link: '#',
-      status: 'coming-soon',
+      link: `/programs/${programId}/stakeholders`,
+      status: 'active',
       color: 'bg-indigo-500',
-      stats: 'Phase 4',
+      stats: `${safeStakeholders.length} stakeholder${safeStakeholders.length !== 1 ? 's' : ''}`,
+      badge: safeSuggestions.length > 0 ? `${safeSuggestions.length} AI detected` : undefined,
     },
     {
       name: 'Decisions',
@@ -120,8 +128,8 @@ export function ProgramDashboard() {
     },
   ]
 
-  const completedArtifacts = artifacts.filter(a => a.processing_status === 'completed').length
-  const pendingArtifacts = artifacts.filter(a => a.processing_status === 'pending').length
+  const completedArtifacts = safeArtifacts.filter(a => a.processing_status === 'completed').length
+  const pendingArtifacts = safeArtifacts.filter(a => a.processing_status === 'pending').length
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -166,7 +174,7 @@ export function ProgramDashboard() {
               <DocumentTextIcon className="h-8 w-8 text-blue-600" />
               <div className="ml-4">
                 <p className="text-sm text-gray-500">Total Artifacts</p>
-                <p className="text-2xl font-semibold text-gray-900">{artifacts.length}</p>
+                <p className="text-2xl font-semibold text-gray-900">{safeArtifacts.length}</p>
               </div>
             </div>
           </div>
