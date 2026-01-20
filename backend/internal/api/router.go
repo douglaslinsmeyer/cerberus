@@ -1,13 +1,13 @@
 package api
 
 import (
-	"net/http"
 	"os"
 
 	"github.com/cerberus/backend/internal/modules/artifacts"
 	"github.com/cerberus/backend/internal/modules/financial"
 	"github.com/cerberus/backend/internal/modules/programs"
 	"github.com/cerberus/backend/internal/modules/risk"
+	"github.com/cerberus/backend/internal/platform/auth"
 	"github.com/cerberus/backend/internal/platform/db"
 	"github.com/cerberus/backend/internal/platform/storage"
 	"github.com/go-chi/chi/v5"
@@ -49,47 +49,37 @@ func NewRouter(database *db.DB) chi.Router {
 	configService := programs.NewConfigService(database)
 	stakeholderRepo := programs.NewStakeholderRepository(database)
 
-	// Auth routes (public)
+	// Initialize auth
+	authRepo := auth.NewRepository(database)
+	tokenService := auth.NewTokenService()
+	authService := auth.NewService(authRepo, tokenService)
+
+	// Auth routes (PUBLIC - no middleware)
 	r.Route("/auth", func(r chi.Router) {
 		r.Post("/register", handleRegister(database))
-		r.Post("/login", handleLogin(database))
-		r.Post("/refresh", handleRefreshToken(database))
+		r.Post("/login", handleLogin(database, authService))
+		r.Post("/refresh", handleRefreshToken(database, authService))
+
+		// Protected auth routes (require authentication)
+		r.Group(func(r chi.Router) {
+			r.Use(auth.AuthMiddleware(tokenService, authRepo))
+			r.Post("/logout", handleLogout(authService))
+			r.Post("/switch-program", handleSwitchProgram(authService))
+		})
 	})
 
-	// Artifacts routes (Phase 2: no auth required yet)
-	artifacts.RegisterRoutes(r, artifactsService)
+	// PROTECTED ROUTES - Require authentication
+	r.Group(func(r chi.Router) {
+		r.Use(auth.AuthMiddleware(tokenService, authRepo))
 
-	// Financial routes (Phase 3: no auth required yet)
-	financial.RegisterRoutes(r, financialService)
-
-	// Risk routes (Phase 3: no auth required yet)
-	risk.RegisterRoutes(r, riskService, conversationService)
-
-	// Programs configuration routes (no auth required yet)
-	programs.RegisterConfigRoutes(r, configService)
-	programs.RegisterStakeholderRoutes(r, stakeholderRepo)
-
-	// Programs CRUD routes (Phase 4 - no auth required yet)
-	programs.RegisterRoutes(r, programsService)
+		// Register module routes (pass authRepo for program access checks)
+		artifacts.RegisterRoutes(r, artifactsService, authRepo)
+		financial.RegisterRoutes(r, financialService, authRepo)
+		risk.RegisterRoutes(r, riskService, conversationService, authRepo)
+		programs.RegisterRoutes(r, programsService, authRepo)
+		programs.RegisterConfigRoutes(r, configService, authRepo)
+		programs.RegisterStakeholderRoutes(r, stakeholderRepo, authRepo)
+	})
 
 	return r
-}
-
-// Placeholder handlers (to be implemented)
-func handleRegister(db *db.DB) func(w http.ResponseWriter, r *http.Request) {
-	return func(w http.ResponseWriter, r *http.Request) {
-		respondJSON(w, http.StatusNotImplemented, ErrorResponse{Error: "Not implemented yet"})
-	}
-}
-
-func handleLogin(db *db.DB) func(w http.ResponseWriter, r *http.Request) {
-	return func(w http.ResponseWriter, r *http.Request) {
-		respondJSON(w, http.StatusNotImplemented, ErrorResponse{Error: "Not implemented yet"})
-	}
-}
-
-func handleRefreshToken(db *db.DB) func(w http.ResponseWriter, r *http.Request) {
-	return func(w http.ResponseWriter, r *http.Request) {
-		respondJSON(w, http.StatusNotImplemented, ErrorResponse{Error: "Not implemented yet"})
-	}
 }

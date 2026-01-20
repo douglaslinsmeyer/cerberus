@@ -1,4 +1,8 @@
 import { Routes, Route, Link } from 'react-router-dom'
+import { AuthProvider } from './contexts/AuthContext'
+import { ProtectedRoute } from './components/ProtectedRoute'
+import { LoginPage } from './modules/auth/pages/LoginPage'
+import { NoAccessPage } from './modules/auth/pages/NoAccessPage'
 import { ArtifactsPage } from './modules/artifacts/pages/ArtifactsPage'
 import { ArtifactDetailPage } from './modules/artifacts/pages/ArtifactDetailPage'
 import { ProgramDashboard } from './modules/programs/pages/ProgramDashboard'
@@ -16,36 +20,100 @@ import { StakeholderSuggestionsPage } from './modules/stakeholders/pages/Stakeho
 
 function App() {
   return (
-    <div className="min-h-screen bg-gray-50">
-      <Routes>
-        <Route path="/" element={<HomePage />} />
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/programs" element={<ProgramListPage />} />
-        <Route path="/programs/:programId" element={<ProgramDashboard />} />
-        <Route path="/programs/:programId/settings" element={<ProgramSettings />} />
+    <AuthProvider>
+      <div className="min-h-screen bg-gray-50">
+        <Routes>
+          {/* Public routes */}
+          <Route path="/" element={<HomePage />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/no-access" element={<NoAccessPage />} />
 
-        {/* Artifacts Module */}
-        <Route path="/programs/:programId/artifacts" element={<ArtifactsPage />} />
-        <Route path="/programs/:programId/artifacts/:artifactId" element={<ArtifactDetailPage />} />
+          {/* Protected routes - require authentication */}
+          <Route path="/programs" element={
+            <ProtectedRoute>
+              <ProgramListPage />
+            </ProtectedRoute>
+          } />
 
-        {/* Financial Module */}
-        <Route path="/programs/:programId/financial" element={<FinancialDashboard />} />
-        <Route path="/programs/:programId/financial/invoices" element={<InvoiceListPage />} />
-        <Route path="/programs/:programId/financial/invoices/:invoiceId" element={<InvoiceDetailPage />} />
+          {/* Program-scoped routes - require program access */}
+          <Route path="/programs/:programId" element={
+            <ProtectedRoute requireProgramAccess>
+              <ProgramDashboard />
+            </ProtectedRoute>
+          } />
+          <Route path="/programs/:programId/settings" element={
+            <ProtectedRoute requireProgramAccess>
+              <ProgramSettings />
+            </ProtectedRoute>
+          } />
 
-        {/* Risk Module */}
-        <Route path="/programs/:programId/risks" element={<RiskDashboard />} />
-        <Route path="/programs/:programId/risks/list" element={<RiskListPage />} />
-        <Route path="/programs/:programId/risks/:riskId" element={<RiskDetailPage />} />
+          {/* Artifacts Module */}
+          <Route path="/programs/:programId/artifacts" element={
+            <ProtectedRoute requireProgramAccess>
+              <ArtifactsPage />
+            </ProtectedRoute>
+          } />
+          <Route path="/programs/:programId/artifacts/:artifactId" element={
+            <ProtectedRoute requireProgramAccess>
+              <ArtifactDetailPage />
+            </ProtectedRoute>
+          } />
 
-        {/* Stakeholders Module */}
-        <Route path="/programs/:programId/stakeholders" element={<StakeholdersPage />} />
-        <Route path="/programs/:programId/stakeholders/suggestions" element={<StakeholderSuggestionsPage />} />
-        <Route path="/programs/:programId/stakeholders/:stakeholderId" element={<StakeholderDetailPage />} />
+          {/* Financial Module */}
+          <Route path="/programs/:programId/financial" element={
+            <ProtectedRoute requireProgramAccess>
+              <FinancialDashboard />
+            </ProtectedRoute>
+          } />
+          <Route path="/programs/:programId/financial/invoices" element={
+            <ProtectedRoute requireProgramAccess>
+              <InvoiceListPage />
+            </ProtectedRoute>
+          } />
+          <Route path="/programs/:programId/financial/invoices/:invoiceId" element={
+            <ProtectedRoute requireProgramAccess>
+              <InvoiceDetailPage />
+            </ProtectedRoute>
+          } />
 
-        <Route path="*" element={<NotFoundPage />} />
-      </Routes>
-    </div>
+          {/* Risk Module */}
+          <Route path="/programs/:programId/risks" element={
+            <ProtectedRoute requireProgramAccess>
+              <RiskDashboard />
+            </ProtectedRoute>
+          } />
+          <Route path="/programs/:programId/risks/list" element={
+            <ProtectedRoute requireProgramAccess>
+              <RiskListPage />
+            </ProtectedRoute>
+          } />
+          <Route path="/programs/:programId/risks/:riskId" element={
+            <ProtectedRoute requireProgramAccess>
+              <RiskDetailPage />
+            </ProtectedRoute>
+          } />
+
+          {/* Stakeholders Module */}
+          <Route path="/programs/:programId/stakeholders" element={
+            <ProtectedRoute requireProgramAccess>
+              <StakeholdersPage />
+            </ProtectedRoute>
+          } />
+          <Route path="/programs/:programId/stakeholders/suggestions" element={
+            <ProtectedRoute requireProgramAccess>
+              <StakeholderSuggestionsPage />
+            </ProtectedRoute>
+          } />
+          <Route path="/programs/:programId/stakeholders/:stakeholderId" element={
+            <ProtectedRoute requireProgramAccess>
+              <StakeholderDetailPage />
+            </ProtectedRoute>
+          } />
+
+          <Route path="*" element={<NotFoundPage />} />
+        </Routes>
+      </div>
+    </AuthProvider>
   )
 }
 
@@ -123,21 +191,6 @@ function HomePage() {
               </ul>
             </div>
           </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function LoginPage() {
-  return (
-    <div className="flex items-center justify-center min-h-screen">
-      <div className="w-full max-w-md">
-        <div className="bg-white shadow-md rounded-lg px-8 pt-6 pb-8 mb-4">
-          <h2 className="text-2xl font-bold mb-6 text-center">Login</h2>
-          <p className="text-center text-gray-600">
-            Authentication coming soon...
-          </p>
         </div>
       </div>
     </div>

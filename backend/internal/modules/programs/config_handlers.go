@@ -4,13 +4,15 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/cerberus/backend/internal/platform/auth"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
 
 // RegisterConfigRoutes registers program configuration endpoints
-func RegisterConfigRoutes(r chi.Router, service *ConfigService) {
+func RegisterConfigRoutes(r chi.Router, service *ConfigService, authRepo *auth.Repository) {
 	r.Route("/programs/{programId}/config", func(r chi.Router) {
+		r.Use(auth.RequireProgramAccess(auth.RoleViewer, authRepo))
 		r.Get("/", handleGetConfig(service))
 		r.Put("/", handleUpdateConfig(service))
 		r.Post("/vendors", handleAddVendor(service))

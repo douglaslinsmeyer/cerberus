@@ -5,13 +5,15 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/cerberus/backend/internal/platform/auth"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
 
 // RegisterRoutes registers all risk endpoints
-func RegisterRoutes(r chi.Router, service *Service, conversationService *ConversationService) {
+func RegisterRoutes(r chi.Router, service *Service, conversationService *ConversationService, authRepo *auth.Repository) {
 	r.Route("/programs/{programId}/risks", func(r chi.Router) {
+		r.Use(auth.RequireProgramAccess(auth.RoleViewer, authRepo))
 		// Risk CRUD
 		r.Post("/", handleCreateRisk(service))
 		r.Get("/", handleListRisks(service))

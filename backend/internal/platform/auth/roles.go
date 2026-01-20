@@ -59,3 +59,51 @@ func ValidateRole(role string) error {
 	_, err := RoleFromString(role)
 	return err
 }
+
+// Organization role level constants
+const (
+	OrgRoleMember = 1
+	OrgRoleAdmin  = 2
+	OrgRoleOwner  = 3
+)
+
+// Organization role name constants
+const (
+	OrgRoleNameMember = "member"
+	OrgRoleNameAdmin  = "admin"
+	OrgRoleNameOwner  = "owner"
+)
+
+// OrgRoleFromString converts an org role string to its numeric level
+func OrgRoleFromString(role string) (int, error) {
+	switch role {
+	case OrgRoleNameMember:
+		return OrgRoleMember, nil
+	case OrgRoleNameAdmin:
+		return OrgRoleAdmin, nil
+	case OrgRoleNameOwner:
+		return OrgRoleOwner, nil
+	default:
+		return 0, fmt.Errorf("invalid org role: %s", role)
+	}
+}
+
+// OrgRoleToString converts a numeric org role level to its string name
+func OrgRoleToString(level int) (string, error) {
+	switch level {
+	case OrgRoleMember:
+		return OrgRoleNameMember, nil
+	case OrgRoleAdmin:
+		return OrgRoleNameAdmin, nil
+	case OrgRoleOwner:
+		return OrgRoleNameOwner, nil
+	default:
+		return "", fmt.Errorf("invalid org role level: %d", level)
+	}
+}
+
+// ValidateOrgRole checks if an org role string is valid
+func ValidateOrgRole(role string) error {
+	_, err := OrgRoleFromString(role)
+	return err
+}

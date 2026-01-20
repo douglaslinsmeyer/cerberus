@@ -6,13 +6,15 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/cerberus/backend/internal/platform/auth"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
 
 // RegisterStakeholderRoutes registers stakeholder management endpoints
-func RegisterStakeholderRoutes(r chi.Router, repo *StakeholderRepository) {
+func RegisterStakeholderRoutes(r chi.Router, repo *StakeholderRepository, authRepo *auth.Repository) {
 	r.Route("/programs/{programId}/stakeholders", func(r chi.Router) {
+		r.Use(auth.RequireProgramAccess(auth.RoleViewer, authRepo))
 		r.Get("/", handleListStakeholders(repo))
 		r.Post("/", handleCreateStakeholder(repo))
 		r.Get("/suggestions", handleGetSuggestions(repo))

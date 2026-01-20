@@ -35,14 +35,24 @@ func NewTokenService() *TokenService {
 }
 
 // GenerateAccessToken generates a new access token
-func (ts *TokenService) GenerateAccessToken(userID, programID uuid.UUID, email, role string, isAdmin bool) (string, error) {
+func (ts *TokenService) GenerateAccessToken(
+	userID uuid.UUID,
+	organizationID uuid.UUID,
+	programID uuid.UUID,
+	email string,
+	orgRole string,
+	programRole string,
+	isAdmin bool,
+) (string, error) {
 	now := time.Now()
 	claims := AccessTokenClaims{
-		UserID:    userID,
-		Email:     email,
-		ProgramID: programID,
-		Role:      role,
-		IsAdmin:   isAdmin,
+		UserID:         userID,
+		Email:          email,
+		OrganizationID: organizationID,
+		ProgramID:      programID,
+		OrgRole:        orgRole,
+		ProgramRole:    programRole,
+		IsAdmin:        isAdmin,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(now.Add(ts.accessExpiry)),
 			IssuedAt:  jwt.NewNumericDate(now),

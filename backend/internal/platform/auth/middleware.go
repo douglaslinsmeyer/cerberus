@@ -98,6 +98,18 @@ func RequireProgramAccess(minRole int, repo *Repository) func(http.Handler) http
 				return
 			}
 
+			// NEW: Verify program belongs to user's organization
+			program, err := repo.GetProgram(r.Context(), programID)
+			if err != nil {
+				respondError(w, http.StatusNotFound, "Program not found")
+				return
+			}
+
+			if program.OrganizationID != claims.OrganizationID {
+				respondError(w, http.StatusForbidden, "Program not in your organization")
+				return
+			}
+
 			// Verify user still has access to program
 			programUser, err := repo.GetProgramUser(r.Context(), programID, claims.UserID)
 			if err != nil {
@@ -127,6 +139,55 @@ func RequireProgramAccess(minRole int, repo *Repository) func(http.Handler) http
 			// TODO: Log access attempt to audit_logs
 
 			// Continue with request
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// RequireOrganizationAccess verifies user has organization access with minimum role
+func RequireOrganizationAccess(minRole int, repo *Repository) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			claims, ok := GetUserClaims(r.Context())
+			if !ok {
+				respondError(w, http.StatusUnauthorized, "Authentication required")
+				return
+			}
+
+			// Verify org membership still valid
+			orgUser, err := repo.GetOrganizationUser(r.Context(), claims.OrganizationID, claims.UserID)
+			if err != nil || orgUser.RevokedAt != nil {
+				respondError(w, http.StatusForbidden, "Organization access revoked")
+				return
+			}
+
+			// Check role meets minimum requirement
+			userRole, err := OrgRoleFromString(orgUser.OrgRole)
+			if err != nil {
+				respondError(w, http.StatusInternalServerError, "Invalid org role")
+				return
+			}
+
+			if userRole < minRole {
+				minRoleStr, _ := OrgRoleToString(minRole)
+				respondError(w, http.StatusForbidden, fmt.Sprintf("Requires %s org role or higher", minRoleStr))
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// RequireGlobalAdmin verifies user is a global system admin
+func RequireGlobalAdmin() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			claims, ok := GetUserClaims(r.Context())
+			if !ok || !claims.IsAdmin {
+				respondError(w, http.StatusForbidden, "Global admin access required")
+				return
+			}
 			next.ServeHTTP(w, r)
 		})
 	}

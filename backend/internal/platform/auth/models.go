@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -44,32 +45,70 @@ type ProgramAccess struct {
 	GrantedAt   time.Time `json:"granted_at"`
 }
 
+// Organization represents a top-level tenant organization
+type Organization struct {
+	OrganizationID   uuid.UUID       `json:"organization_id"`
+	OrganizationName string          `json:"organization_name"`
+	OrganizationCode string          `json:"organization_code"`
+	Status           string          `json:"status"`
+	Settings         json.RawMessage `json:"settings"`
+	PlanTier         string          `json:"plan_tier"`
+	MaxPrograms      int             `json:"max_programs"`
+	MaxUsers         int             `json:"max_users"`
+	CreatedAt        time.Time       `json:"created_at"`
+	CreatedBy        *uuid.UUID      `json:"created_by,omitempty"`
+	UpdatedAt        time.Time       `json:"updated_at"`
+	DeletedAt        *time.Time      `json:"deleted_at,omitempty"`
+}
+
+// OrganizationUser represents a user's membership in an organization
+type OrganizationUser struct {
+	OrganizationUserID uuid.UUID  `json:"organization_user_id"`
+	OrganizationID     uuid.UUID  `json:"organization_id"`
+	UserID             uuid.UUID  `json:"user_id"`
+	OrgRole            string     `json:"org_role"` // 'owner', 'admin', 'member'
+	GrantedAt          time.Time  `json:"granted_at"`
+	GrantedBy          *uuid.UUID `json:"granted_by,omitempty"`
+	RevokedAt          *time.Time `json:"revoked_at,omitempty"`
+}
+
+// OrganizationInfo represents organization information in responses
+type OrganizationInfo struct {
+	OrganizationID   uuid.UUID `json:"organization_id"`
+	OrganizationName string    `json:"organization_name"`
+	OrganizationCode string    `json:"organization_code"`
+	OrgRole          string    `json:"org_role"` // User's role in org
+}
+
 // RefreshToken represents a refresh token in the database
 type RefreshToken struct {
-	TokenID    uuid.UUID  `json:"token_id"`
-	UserID     uuid.UUID  `json:"user_id"`
-	ProgramID  uuid.UUID  `json:"program_id"`
-	IssuedAt   time.Time  `json:"issued_at"`
-	ExpiresAt  time.Time  `json:"expires_at"`
-	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
-	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
-	IPAddress  *string    `json:"ip_address,omitempty"`
-	UserAgent  *string    `json:"user_agent,omitempty"`
+	TokenID        uuid.UUID  `json:"token_id"`
+	UserID         uuid.UUID  `json:"user_id"`
+	OrganizationID uuid.UUID  `json:"organization_id"` // NEW
+	ProgramID      uuid.UUID  `json:"program_id"`
+	IssuedAt       time.Time  `json:"issued_at"`
+	ExpiresAt      time.Time  `json:"expires_at"`
+	RevokedAt      *time.Time `json:"revoked_at,omitempty"`
+	LastUsedAt     *time.Time `json:"last_used_at,omitempty"`
+	IPAddress      *string    `json:"ip_address,omitempty"`
+	UserAgent      *string    `json:"user_agent,omitempty"`
 }
 
 // Invitation represents a user invitation
 type Invitation struct {
-	InvitationID uuid.UUID  `json:"invitation_id"`
-	Email        string     `json:"email"`
-	ProgramID    uuid.UUID  `json:"program_id"`
-	Role         string     `json:"role"`
-	IsAdmin      bool       `json:"is_admin"`
-	InvitedBy    uuid.UUID  `json:"invited_by"`
-	InvitedAt    time.Time  `json:"invited_at"`
-	ExpiresAt    time.Time  `json:"expires_at"`
-	AcceptedAt   *time.Time `json:"accepted_at,omitempty"`
-	UserID       *uuid.UUID `json:"user_id,omitempty"`
-	Token        string     `json:"token,omitempty"` // Only populated when creating
+	InvitationID   uuid.UUID  `json:"invitation_id"`
+	Email          string     `json:"email"`
+	OrganizationID uuid.UUID  `json:"organization_id"` // NEW
+	ProgramID      uuid.UUID  `json:"program_id"`
+	OrgRole        string     `json:"org_role"`  // NEW: Organization-level role
+	Role           string     `json:"role"`      // Program-level role
+	IsAdmin        bool       `json:"is_admin"`
+	InvitedBy      uuid.UUID  `json:"invited_by"`
+	InvitedAt      time.Time  `json:"invited_at"`
+	ExpiresAt      time.Time  `json:"expires_at"`
+	AcceptedAt     *time.Time `json:"accepted_at,omitempty"`
+	UserID         *uuid.UUID `json:"user_id,omitempty"`
+	Token          string     `json:"token,omitempty"` // Only populated when creating
 }
 
 // PasswordResetToken represents a password reset token
@@ -83,16 +122,18 @@ type PasswordResetToken struct {
 
 // LoginRequest represents a login request
 type LoginRequest struct {
-	Email     string    `json:"email"`
-	Password  string    `json:"password"`
-	ProgramID uuid.UUID `json:"program_id"` // Required: which program to access
+	Email    string `json:"email"`
+	Password string `json:"password"`
+	// No ProgramID required - backend will determine it
 }
 
 // LoginResponse represents a login response
 type LoginResponse struct {
-	User     UserInfo        `json:"user"`
-	Tokens   TokenPair       `json:"tokens"`
-	Programs []ProgramAccess `json:"programs"` // All programs user can access
+	User           UserInfo          `json:"user"`
+	Organization   OrganizationInfo  `json:"organization"`      // NEW
+	CurrentProgram *ProgramAccess    `json:"current_program"`   // NEW - may be nil if no program access
+	Tokens         *TokenPair        `json:"tokens,omitempty"`  // Nil if no program access
+	Programs       []ProgramAccess   `json:"programs"`          // All programs user can access
 }
 
 // UserInfo represents basic user information
@@ -122,10 +163,12 @@ type SwitchProgramRequest struct {
 
 // CreateInvitationRequest represents an invitation creation request
 type CreateInvitationRequest struct {
-	Email     string    `json:"email"`
-	ProgramID uuid.UUID `json:"program_id"`
-	Role      string    `json:"role"` // 'admin', 'contributor', 'viewer'
-	IsAdmin   bool      `json:"is_admin"`
+	Email          string    `json:"email"`
+	OrganizationID uuid.UUID `json:"organization_id"` // NEW
+	ProgramID      uuid.UUID `json:"program_id"`
+	OrgRole        string    `json:"org_role"` // NEW: 'owner', 'admin', 'member'
+	Role           string    `json:"role"`     // Program-level: 'admin', 'contributor', 'viewer'
+	IsAdmin        bool      `json:"is_admin"`
 }
 
 // AcceptInvitationRequest represents an invitation acceptance request

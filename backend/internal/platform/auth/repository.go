@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"time"
 
 	"github.com/cerberus/backend/internal/platform/db"
 	"github.com/google/uuid"
@@ -265,7 +264,195 @@ func (r *Repository) UpdateLastProgramAccessed(ctx context.Context, userID, prog
 	return nil
 }
 
+// ==================== Organization Operations ====================
+
+// GetOrganizationByID retrieves an organization by ID
+func (r *Repository) GetOrganizationByID(ctx context.Context, organizationID uuid.UUID) (*Organization, error) {
+	query := `
+		SELECT organization_id, organization_name, organization_code, status, settings,
+		       plan_tier, max_programs, max_users, created_at, created_by, updated_at, deleted_at
+		FROM organizations
+		WHERE organization_id = $1 AND deleted_at IS NULL
+	`
+
+	var org Organization
+	err := r.db.QueryRowContext(ctx, query, organizationID).Scan(
+		&org.OrganizationID,
+		&org.OrganizationName,
+		&org.OrganizationCode,
+		&org.Status,
+		&org.Settings,
+		&org.PlanTier,
+		&org.MaxPrograms,
+		&org.MaxUsers,
+		&org.CreatedAt,
+		&org.CreatedBy,
+		&org.UpdatedAt,
+		&org.DeletedAt,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("organization not found")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get organization: %w", err)
+	}
+
+	return &org, nil
+}
+
+// GetUserOrganization retrieves the organization a user belongs to
+func (r *Repository) GetUserOrganization(ctx context.Context, userID uuid.UUID) (*Organization, error) {
+	query := `
+		SELECT o.organization_id, o.organization_name, o.organization_code, o.status, o.settings,
+		       o.plan_tier, o.max_programs, o.max_users, o.created_at, o.created_by, o.updated_at, o.deleted_at
+		FROM organizations o
+		JOIN organization_users ou ON o.organization_id = ou.organization_id
+		WHERE ou.user_id = $1 AND ou.revoked_at IS NULL AND o.deleted_at IS NULL
+		LIMIT 1
+	`
+
+	var org Organization
+	err := r.db.QueryRowContext(ctx, query, userID).Scan(
+		&org.OrganizationID,
+		&org.OrganizationName,
+		&org.OrganizationCode,
+		&org.Status,
+		&org.Settings,
+		&org.PlanTier,
+		&org.MaxPrograms,
+		&org.MaxUsers,
+		&org.CreatedAt,
+		&org.CreatedBy,
+		&org.UpdatedAt,
+		&org.DeletedAt,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("user not linked to organization")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user organization: %w", err)
+	}
+
+	return &org, nil
+}
+
+// GetOrganizationUser retrieves a user's membership in an organization
+func (r *Repository) GetOrganizationUser(ctx context.Context, organizationID, userID uuid.UUID) (*OrganizationUser, error) {
+	query := `
+		SELECT organization_user_id, organization_id, user_id, org_role,
+		       granted_at, granted_by, revoked_at
+		FROM organization_users
+		WHERE organization_id = $1 AND user_id = $2 AND revoked_at IS NULL
+	`
+
+	var orgUser OrganizationUser
+	err := r.db.QueryRowContext(ctx, query, organizationID, userID).Scan(
+		&orgUser.OrganizationUserID,
+		&orgUser.OrganizationID,
+		&orgUser.UserID,
+		&orgUser.OrgRole,
+		&orgUser.GrantedAt,
+		&orgUser.GrantedBy,
+		&orgUser.RevokedAt,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("organization membership not found")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get organization user: %w", err)
+	}
+
+	return &orgUser, nil
+}
+
+// CreateOrganization creates a new organization
+func (r *Repository) CreateOrganization(ctx context.Context, org *Organization) error {
+	query := `
+		INSERT INTO organizations (organization_id, organization_name, organization_code, status,
+		                           settings, plan_tier, max_programs, max_users, created_at, created_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+	`
+
+	_, err := r.db.ExecContext(ctx, query,
+		org.OrganizationID,
+		org.OrganizationName,
+		org.OrganizationCode,
+		org.Status,
+		org.Settings,
+		org.PlanTier,
+		org.MaxPrograms,
+		org.MaxUsers,
+		org.CreatedAt,
+		org.CreatedBy,
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to create organization: %w", err)
+	}
+
+	return nil
+}
+
+// CreateOrganizationUser links a user to an organization
+func (r *Repository) CreateOrganizationUser(ctx context.Context, orgUser *OrganizationUser) error {
+	query := `
+		INSERT INTO organization_users (organization_user_id, organization_id, user_id, org_role,
+		                                 granted_at, granted_by)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`
+
+	_, err := r.db.ExecContext(ctx, query,
+		orgUser.OrganizationUserID,
+		orgUser.OrganizationID,
+		orgUser.UserID,
+		orgUser.OrgRole,
+		orgUser.GrantedAt,
+		orgUser.GrantedBy,
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to create organization user: %w", err)
+	}
+
+	return nil
+}
+
+// Program represents minimal program info for auth checks
+type Program struct {
+	ProgramID      uuid.UUID
+	ProgramName    string
+	OrganizationID uuid.UUID
+}
+
 // ==================== Program Access Operations ====================
+
+// GetProgram retrieves basic program information (for auth checks)
+func (r *Repository) GetProgram(ctx context.Context, programID uuid.UUID) (*Program, error) {
+	query := `
+		SELECT program_id, program_name, organization_id
+		FROM programs
+		WHERE program_id = $1 AND deleted_at IS NULL
+	`
+
+	var prog Program
+	err := r.db.QueryRowContext(ctx, query, programID).Scan(
+		&prog.ProgramID,
+		&prog.ProgramName,
+		&prog.OrganizationID,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("program not found")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get program: %w", err)
+	}
+
+	return &prog, nil
+}
 
 // GetProgramUser retrieves a user's access to a specific program
 func (r *Repository) GetProgramUser(ctx context.Context, programID, userID uuid.UUID) (*ProgramUser, error) {
@@ -298,17 +485,18 @@ func (r *Repository) GetProgramUser(ctx context.Context, programID, userID uuid.
 	return &pu, nil
 }
 
-// GetUserPrograms retrieves all programs a user has access to
-func (r *Repository) GetUserPrograms(ctx context.Context, userID uuid.UUID) ([]ProgramAccess, error) {
+// GetUserPrograms retrieves all programs a user has access to within an organization
+func (r *Repository) GetUserPrograms(ctx context.Context, userID, organizationID uuid.UUID) ([]ProgramAccess, error) {
 	query := `
 		SELECT p.program_id, p.program_name, p.program_code, pu.role, pu.granted_at
 		FROM program_users pu
 		JOIN programs p ON pu.program_id = p.program_id
-		WHERE pu.user_id = $1 AND pu.revoked_at IS NULL AND p.deleted_at IS NULL
+		WHERE pu.user_id = $1 AND p.organization_id = $2
+		      AND pu.revoked_at IS NULL AND p.deleted_at IS NULL
 		ORDER BY pu.granted_at DESC
 	`
 
-	rows, err := r.db.QueryContext(ctx, query, userID)
+	rows, err := r.db.QueryContext(ctx, query, userID, organizationID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user programs: %w", err)
 	}
@@ -411,13 +599,14 @@ func (r *Repository) RevokeProgramAccess(ctx context.Context, programID, userID 
 // StoreRefreshToken stores a new refresh token
 func (r *Repository) StoreRefreshToken(ctx context.Context, token RefreshToken) error {
 	query := `
-		INSERT INTO refresh_tokens (token_id, user_id, program_id, issued_at, expires_at, ip_address, user_agent)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO refresh_tokens (token_id, user_id, organization_id, program_id, issued_at, expires_at, ip_address, user_agent)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 	`
 
 	_, err := r.db.ExecContext(ctx, query,
 		token.TokenID,
 		token.UserID,
+		token.OrganizationID,
 		token.ProgramID,
 		token.IssuedAt,
 		token.ExpiresAt,
@@ -435,7 +624,7 @@ func (r *Repository) StoreRefreshToken(ctx context.Context, token RefreshToken) 
 // GetRefreshToken retrieves a refresh token by ID
 func (r *Repository) GetRefreshToken(ctx context.Context, tokenID uuid.UUID) (*RefreshToken, error) {
 	query := `
-		SELECT token_id, user_id, program_id, issued_at, expires_at, revoked_at,
+		SELECT token_id, user_id, organization_id, program_id, issued_at, expires_at, revoked_at,
 		       last_used_at, ip_address, user_agent
 		FROM refresh_tokens
 		WHERE token_id = $1
@@ -445,6 +634,7 @@ func (r *Repository) GetRefreshToken(ctx context.Context, tokenID uuid.UUID) (*R
 	err := r.db.QueryRowContext(ctx, query, tokenID).Scan(
 		&token.TokenID,
 		&token.UserID,
+		&token.OrganizationID,
 		&token.ProgramID,
 		&token.IssuedAt,
 		&token.ExpiresAt,
@@ -731,8 +921,14 @@ func (r *Repository) GetLastAccessedProgram(ctx context.Context, userID uuid.UUI
 		return &pa, nil
 	}
 
-	// If not found, get the first program they have access to
-	programs, err := r.GetUserPrograms(ctx, userID)
+	// If not found, get user's organization and then get first program
+	org, err := r.GetUserOrganization(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("user not linked to organization: %w", err)
+	}
+
+	// Get the first program they have access to in their org
+	programs, err := r.GetUserPrograms(ctx, userID, org.OrganizationID)
 	if err != nil {
 		return nil, err
 	}

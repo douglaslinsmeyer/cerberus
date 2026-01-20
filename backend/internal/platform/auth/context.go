@@ -31,13 +31,36 @@ func GetProgramID(ctx context.Context) (uuid.UUID, error) {
 	return claims.ProgramID, nil
 }
 
-// GetUserRole extracts user role from context
-func GetUserRole(ctx context.Context) (string, error) {
+// GetOrganizationID extracts organization ID from context
+func GetOrganizationID(ctx context.Context) (uuid.UUID, error) {
+	claims, ok := GetUserClaims(ctx)
+	if !ok {
+		return uuid.Nil, fmt.Errorf("user claims not found in context")
+	}
+	return claims.OrganizationID, nil
+}
+
+// GetOrgRole extracts organization role from context
+func GetOrgRole(ctx context.Context) (string, error) {
 	claims, ok := GetUserClaims(ctx)
 	if !ok {
 		return "", fmt.Errorf("user claims not found in context")
 	}
-	return claims.Role, nil
+	return claims.OrgRole, nil
+}
+
+// GetProgramRole extracts program role from context
+func GetProgramRole(ctx context.Context) (string, error) {
+	claims, ok := GetUserClaims(ctx)
+	if !ok {
+		return "", fmt.Errorf("user claims not found in context")
+	}
+	return claims.ProgramRole, nil
+}
+
+// GetUserRole is deprecated, use GetProgramRole instead
+func GetUserRole(ctx context.Context) (string, error) {
+	return GetProgramRole(ctx)
 }
 
 // IsAdmin checks if user is a global admin

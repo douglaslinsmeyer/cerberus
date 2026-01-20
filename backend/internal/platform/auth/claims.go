@@ -7,11 +7,13 @@ import (
 
 // AccessTokenClaims represents the claims in an access token
 type AccessTokenClaims struct {
-	UserID    uuid.UUID `json:"user_id"`
-	Email     string    `json:"email"`
-	ProgramID uuid.UUID `json:"program_id"` // Single program context
-	Role      string    `json:"role"`       // Role within this program
-	IsAdmin   bool      `json:"is_admin"`   // Global admin flag
+	UserID         uuid.UUID `json:"user_id"`
+	Email          string    `json:"email"`
+	OrganizationID uuid.UUID `json:"organization_id"` // NEW: Organization context
+	ProgramID      uuid.UUID `json:"program_id"`      // Program context (within org)
+	OrgRole        string    `json:"org_role"`        // NEW: Organization-level role (owner/admin/member)
+	ProgramRole    string    `json:"program_role"`    // Program-level role (admin/contributor/viewer)
+	IsAdmin        bool      `json:"is_admin"`        // Global system admin flag
 	jwt.RegisteredClaims
 }
 

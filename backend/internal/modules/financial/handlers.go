@@ -7,13 +7,15 @@ import (
 	"time"
 
 	"github.com/cerberus/backend/internal/platform/ai"
+	"github.com/cerberus/backend/internal/platform/auth"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
 
 // RegisterRoutes registers all financial endpoints
-func RegisterRoutes(r chi.Router, service *Service) {
+func RegisterRoutes(r chi.Router, service *Service, authRepo *auth.Repository) {
 	r.Route("/programs/{programId}/financial", func(r chi.Router) {
+		r.Use(auth.RequireProgramAccess(auth.RoleViewer, authRepo))
 		// Rate cards
 		r.Route("/rate-cards", func(r chi.Router) {
 			r.Post("/", handleCreateRateCard(service))

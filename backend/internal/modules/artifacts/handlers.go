@@ -7,23 +7,30 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/cerberus/backend/internal/platform/auth"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
 
 // RegisterRoutes registers all artifact endpoints
-func RegisterRoutes(r chi.Router, service *Service) {
+func RegisterRoutes(r chi.Router, service *Service, authRepo *auth.Repository) {
 	r.Route("/programs/{programId}/artifacts", func(r chi.Router) {
-		r.Post("/upload", handleUpload(service))
-		r.Get("/", handleList(service))
-		r.Post("/search", handleSearch(service))
+		// Viewer access (read operations)
+		r.Group(func(r chi.Router) {
+			r.Use(auth.RequireProgramAccess(auth.RoleViewer, authRepo))
+			r.Get("/", handleList(service))
+			r.Get("/{artifactId}", handleGet(service))
+			r.Get("/{artifactId}/metadata", handleGetMetadata(service))
+			r.Get("/{artifactId}/download", handleDownload(service))
+		})
 
-		r.Route("/{artifactId}", func(r chi.Router) {
-			r.Get("/", handleGet(service))
-			r.Get("/metadata", handleGetMetadata(service))
-			r.Get("/download", handleDownload(service))
-			r.Post("/reanalyze", handleReanalyze(service))
-			r.Delete("/", handleDelete(service))
+		// Contributor access (write operations)
+		r.Group(func(r chi.Router) {
+			r.Use(auth.RequireProgramAccess(auth.RoleContributor, authRepo))
+			r.Post("/upload", handleUpload(service))
+			r.Post("/search", handleSearch(service))
+			r.Post("/{artifactId}/reanalyze", handleReanalyze(service))
+			r.Delete("/{artifactId}", handleDelete(service))
 		})
 	})
 }

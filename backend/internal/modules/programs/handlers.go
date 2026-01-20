@@ -5,12 +5,14 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/cerberus/backend/internal/platform/auth"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
 
 // RegisterRoutes registers all program endpoints
-func RegisterRoutes(r chi.Router, service *Service) {
+func RegisterRoutes(r chi.Router, service *Service, authRepo *auth.Repository) {
+	// Note: Programs routes don't need program-specific auth, they list all programs in user's org
 	r.Route("/programs", func(r chi.Router) {
 		r.Get("/", handleListPrograms(service))
 		r.Post("/", handleCreateProgram(service))

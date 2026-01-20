@@ -33,7 +33,7 @@ func (s *AuthService) InitiatePasswordReset(ctx context.Context, email string) e
 	if _, err := rand.Read(tokenBytes); err != nil {
 		return fmt.Errorf("failed to generate reset token: %w", err)
 	}
-	tokenStr := base64.URLEncoding.EncodeToString(tokenBytes)
+	_ = base64.URLEncoding.EncodeToString(tokenBytes) // TODO: Send via email
 
 	// Hash token for storage
 	hashedToken := sha256.Sum256(tokenBytes)

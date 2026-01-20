@@ -161,7 +161,24 @@ func (s *AuthService) AcceptInvitation(ctx context.Context, req AcceptInvitation
 		}
 	}
 
-	// 5. Grant program access (if not already exists)
+	// 5. Grant organization membership (if not already exists)
+	_, err = s.repo.GetOrganizationUser(ctx, invitation.OrganizationID, user.UserID)
+	if err != nil {
+		// Organization access doesn't exist, create it
+		err = s.repo.CreateOrganizationUser(ctx, &OrganizationUser{
+			OrganizationUserID: uuid.New(),
+			OrganizationID:     invitation.OrganizationID,
+			UserID:             user.UserID,
+			OrgRole:            invitation.OrgRole,
+			GrantedBy:          &invitation.InvitedBy,
+			GrantedAt:          time.Now(),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to grant organization access: %w", err)
+		}
+	}
+
+	// 6. Grant program access (if not already exists)
 	_, err = s.repo.GetProgramUser(ctx, invitation.ProgramID, user.UserID)
 	if err != nil {
 		// Access doesn't exist, create it
@@ -178,17 +195,30 @@ func (s *AuthService) AcceptInvitation(ctx context.Context, req AcceptInvitation
 		}
 	}
 
-	// 6. Mark invitation as accepted
+	// 7. Mark invitation as accepted
 	err = s.repo.AcceptInvitation(ctx, invitation.InvitationID, user.UserID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to mark invitation as accepted: %w", err)
 	}
 
-	// 7. Generate tokens
+	// 8. Get organization info
+	org, err := s.repo.GetOrganizationByID(ctx, invitation.OrganizationID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get organization: %w", err)
+	}
+
+	orgUser, err := s.repo.GetOrganizationUser(ctx, invitation.OrganizationID, user.UserID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get organization membership: %w", err)
+	}
+
+	// 9. Generate tokens
 	accessToken, err := s.tokenService.GenerateAccessToken(
 		user.UserID,
+		invitation.OrganizationID,
 		invitation.ProgramID,
 		user.Email,
+		orgUser.OrgRole,
 		invitation.Role,
 		user.IsAdmin,
 	)
@@ -201,25 +231,34 @@ func (s *AuthService) AcceptInvitation(ctx context.Context, req AcceptInvitation
 		return nil, fmt.Errorf("failed to generate refresh token: %w", err)
 	}
 
-	// 8. Store refresh token
+	// 10. Store refresh token
 	err = s.repo.StoreRefreshToken(ctx, RefreshToken{
-		TokenID:   tokenID,
-		UserID:    user.UserID,
-		ProgramID: invitation.ProgramID,
-		IssuedAt:  time.Now(),
-		ExpiresAt: time.Now().Add(s.tokenService.GetRefreshTokenExpiry()),
+		TokenID:        tokenID,
+		UserID:         user.UserID,
+		OrganizationID: invitation.OrganizationID,
+		ProgramID:      invitation.ProgramID,
+		IssuedAt:       time.Now(),
+		ExpiresAt:      time.Now().Add(s.tokenService.GetRefreshTokenExpiry()),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to store refresh token: %w", err)
 	}
 
-	// 9. Update last program accessed
+	// 11. Update last program accessed
 	_ = s.repo.UpdateLastProgramAccessed(ctx, user.UserID, invitation.ProgramID)
 
-	// 10. Fetch all programs user has access to
-	programs, err := s.repo.GetUserPrograms(ctx, user.UserID)
+	// 12. Fetch all programs user has access to
+	programs, err := s.repo.GetUserPrograms(ctx, user.UserID, invitation.OrganizationID)
 	if err != nil {
 		programs = []ProgramAccess{}
+	}
+
+	selectedProgram := ProgramAccess{
+		ProgramID:   invitation.ProgramID,
+		ProgramName: "", // Will be filled from programs list if needed
+		ProgramCode: "",
+		Role:        invitation.Role,
+		GrantedAt:   time.Now(),
 	}
 
 	return &LoginResponse{
@@ -229,7 +268,14 @@ func (s *AuthService) AcceptInvitation(ctx context.Context, req AcceptInvitation
 			FullName: user.FullName,
 			IsAdmin:  user.IsAdmin,
 		},
-		Tokens: TokenPair{
+		Organization: OrganizationInfo{
+			OrganizationID:   org.OrganizationID,
+			OrganizationName: org.OrganizationName,
+			OrganizationCode: org.OrganizationCode,
+			OrgRole:          orgUser.OrgRole,
+		},
+		CurrentProgram: &selectedProgram,
+		Tokens: &TokenPair{
 			AccessToken:  accessToken,
 			RefreshToken: refreshToken,
 			ExpiresIn:    int64(s.tokenService.GetAccessTokenExpiry().Seconds()),

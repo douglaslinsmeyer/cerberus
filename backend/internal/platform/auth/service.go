@@ -55,24 +55,72 @@ func (s *AuthService) Login(ctx context.Context, req LoginRequest) (*LoginRespon
 		return nil, fmt.Errorf("invalid credentials")
 	}
 
-	// 6. Verify user has access to requested program
-	programUser, err := s.repo.GetProgramUser(ctx, req.ProgramID, user.UserID)
-	if err != nil {
-		return nil, fmt.Errorf("no access to this program")
-	}
-
-	if programUser.RevokedAt != nil {
-		return nil, fmt.Errorf("program access has been revoked")
-	}
-
-	// 7. Reset failed attempts on successful login
+	// 6. Reset failed attempts on successful login
 	_ = s.repo.ResetFailedAttempts(ctx, user.UserID)
 
-	// 8. Generate tokens
+	// 7. Get user's organization
+	org, err := s.repo.GetUserOrganization(ctx, user.UserID)
+	if err != nil {
+		return nil, fmt.Errorf("user not linked to organization")
+	}
+
+	// 8. Get organization membership
+	orgUser, err := s.repo.GetOrganizationUser(ctx, org.OrganizationID, user.UserID)
+	if err != nil || orgUser.RevokedAt != nil {
+		return nil, fmt.Errorf("organization access revoked")
+	}
+
+	// 9. Fetch all programs user has access to in their org
+	programs, err := s.repo.GetUserPrograms(ctx, user.UserID, org.OrganizationID)
+	if err != nil {
+		programs = []ProgramAccess{}
+	}
+
+	// 10. If no programs, return response without tokens
+	if len(programs) == 0 {
+		return &LoginResponse{
+			User: UserInfo{
+				UserID:   user.UserID,
+				Email:    user.Email,
+				FullName: user.FullName,
+				IsAdmin:  user.IsAdmin,
+			},
+			Organization: OrganizationInfo{
+				OrganizationID:   org.OrganizationID,
+				OrganizationName: org.OrganizationName,
+				OrganizationCode: org.OrganizationCode,
+				OrgRole:          orgUser.OrgRole,
+			},
+			CurrentProgram: nil,
+			Tokens:         nil,
+			Programs:       []ProgramAccess{},
+		}, nil
+	}
+
+	// 11. Select program (last accessed or first)
+	selectedProgram := programs[0]
+	if user.LastProgramAccessed != nil {
+		for _, p := range programs {
+			if p.ProgramID == *user.LastProgramAccessed {
+				selectedProgram = p
+				break
+			}
+		}
+	}
+
+	// 12. Get program access details
+	programUser, err := s.repo.GetProgramUser(ctx, selectedProgram.ProgramID, user.UserID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get program access: %w", err)
+	}
+
+	// 13. Generate tokens
 	accessToken, err := s.tokenService.GenerateAccessToken(
 		user.UserID,
-		req.ProgramID,
+		org.OrganizationID,
+		selectedProgram.ProgramID,
 		user.Email,
+		orgUser.OrgRole,
 		programUser.Role,
 		user.IsAdmin,
 	)
@@ -85,27 +133,22 @@ func (s *AuthService) Login(ctx context.Context, req LoginRequest) (*LoginRespon
 		return nil, fmt.Errorf("failed to generate refresh token: %w", err)
 	}
 
-	// 9. Store refresh token in database
+	// 14. Store refresh token in database
 	err = s.repo.StoreRefreshToken(ctx, RefreshToken{
-		TokenID:   tokenID,
-		UserID:    user.UserID,
-		ProgramID: req.ProgramID,
-		IssuedAt:  time.Now(),
-		ExpiresAt: time.Now().Add(s.tokenService.GetRefreshTokenExpiry()),
+		TokenID:        tokenID,
+		UserID:         user.UserID,
+		OrganizationID: org.OrganizationID,
+		ProgramID:      selectedProgram.ProgramID,
+		IssuedAt:       time.Now(),
+		ExpiresAt:      time.Now().Add(s.tokenService.GetRefreshTokenExpiry()),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to store refresh token: %w", err)
 	}
 
-	// 10. Update last login and last program accessed
+	// 15. Update last login and last program accessed
 	_ = s.repo.UpdateLastLogin(ctx, user.UserID)
-	_ = s.repo.UpdateLastProgramAccessed(ctx, user.UserID, req.ProgramID)
-
-	// 11. Fetch all programs user has access to
-	programs, err := s.repo.GetUserPrograms(ctx, user.UserID)
-	if err != nil {
-		programs = []ProgramAccess{} // Return empty if failed
-	}
+	_ = s.repo.UpdateLastProgramAccessed(ctx, user.UserID, selectedProgram.ProgramID)
 
 	return &LoginResponse{
 		User: UserInfo{
@@ -114,7 +157,14 @@ func (s *AuthService) Login(ctx context.Context, req LoginRequest) (*LoginRespon
 			FullName: user.FullName,
 			IsAdmin:  user.IsAdmin,
 		},
-		Tokens: TokenPair{
+		Organization: OrganizationInfo{
+			OrganizationID:   org.OrganizationID,
+			OrganizationName: org.OrganizationName,
+			OrganizationCode: org.OrganizationCode,
+			OrgRole:          orgUser.OrgRole,
+		},
+		CurrentProgram: &selectedProgram,
+		Tokens: &TokenPair{
 			AccessToken:  accessToken,
 			RefreshToken: refreshToken,
 			ExpiresIn:    int64(s.tokenService.GetAccessTokenExpiry().Seconds()),
@@ -155,32 +205,40 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshTokenString strin
 		return nil, fmt.Errorf("account is inactive")
 	}
 
-	// 4. Get user's program access for the stored program
+	// 4. Get organization membership
+	orgUser, err := s.repo.GetOrganizationUser(ctx, storedToken.OrganizationID, user.UserID)
+	if err != nil || orgUser.RevokedAt != nil {
+		return nil, fmt.Errorf("organization access revoked")
+	}
+
+	// 5. Get user's program access for the stored program
 	programUser, err := s.repo.GetProgramUser(ctx, storedToken.ProgramID, user.UserID)
 	if err != nil {
-		// If program access lost, get their last accessed or first available program
-		lastProgram, err := s.repo.GetLastAccessedProgram(ctx, user.UserID)
-		if err != nil {
+		// If program access lost, get their first available program in org
+		programs, err := s.repo.GetUserPrograms(ctx, user.UserID, storedToken.OrganizationID)
+		if err != nil || len(programs) == 0 {
 			return nil, fmt.Errorf("no program access available")
 		}
-		storedToken.ProgramID = lastProgram.ProgramID
+		storedToken.ProgramID = programs[0].ProgramID
 		programUser = &ProgramUser{
-			ProgramID: lastProgram.ProgramID,
-			Role:      lastProgram.Role,
+			ProgramID: programs[0].ProgramID,
+			Role:      programs[0].Role,
 		}
 	}
 
-	// 5. Revoke old refresh token (rotation)
+	// 6. Revoke old refresh token (rotation)
 	err = s.repo.RevokeRefreshToken(ctx, claims.TokenID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to revoke old refresh token: %w", err)
 	}
 
-	// 6. Generate new tokens
+	// 7. Generate new tokens
 	accessToken, err := s.tokenService.GenerateAccessToken(
 		user.UserID,
+		storedToken.OrganizationID,
 		storedToken.ProgramID,
 		user.Email,
+		orgUser.OrgRole,
 		programUser.Role,
 		user.IsAdmin,
 	)
@@ -193,13 +251,14 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshTokenString strin
 		return nil, fmt.Errorf("failed to generate refresh token: %w", err)
 	}
 
-	// 7. Store new refresh token
+	// 8. Store new refresh token
 	err = s.repo.StoreRefreshToken(ctx, RefreshToken{
-		TokenID:   newTokenID,
-		UserID:    user.UserID,
-		ProgramID: storedToken.ProgramID,
-		IssuedAt:  time.Now(),
-		ExpiresAt: time.Now().Add(s.tokenService.GetRefreshTokenExpiry()),
+		TokenID:        newTokenID,
+		UserID:         user.UserID,
+		OrganizationID: storedToken.OrganizationID,
+		ProgramID:      storedToken.ProgramID,
+		IssuedAt:       time.Now(),
+		ExpiresAt:      time.Now().Add(s.tokenService.GetRefreshTokenExpiry()),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to store new refresh token: %w", err)
@@ -213,8 +272,18 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshTokenString strin
 }
 
 // SwitchProgram generates a new access token for a different program
-func (s *AuthService) SwitchProgram(ctx context.Context, userID, programID uuid.UUID) (*TokenPair, error) {
-	// 1. Verify user has access to the program
+func (s *AuthService) SwitchProgram(ctx context.Context, userID, organizationID, programID uuid.UUID) (*TokenPair, error) {
+	// 1. Verify program belongs to user's organization
+	program, err := s.repo.GetProgram(ctx, programID)
+	if err != nil {
+		return nil, fmt.Errorf("program not found")
+	}
+
+	if program.OrganizationID != organizationID {
+		return nil, fmt.Errorf("program not in your organization")
+	}
+
+	// 2. Verify user has access to the program
 	programUser, err := s.repo.GetProgramUser(ctx, programID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("no access to this program")
@@ -224,7 +293,7 @@ func (s *AuthService) SwitchProgram(ctx context.Context, userID, programID uuid.
 		return nil, fmt.Errorf("program access has been revoked")
 	}
 
-	// 2. Get user details
+	// 3. Get user details
 	user, err := s.repo.GetUserByID(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("user not found")
@@ -234,11 +303,19 @@ func (s *AuthService) SwitchProgram(ctx context.Context, userID, programID uuid.
 		return nil, fmt.Errorf("account is inactive")
 	}
 
-	// 3. Generate new access token for this program
+	// 4. Get organization membership
+	orgUser, err := s.repo.GetOrganizationUser(ctx, organizationID, userID)
+	if err != nil || orgUser.RevokedAt != nil {
+		return nil, fmt.Errorf("organization access revoked")
+	}
+
+	// 5. Generate new access token for this program
 	accessToken, err := s.tokenService.GenerateAccessToken(
 		user.UserID,
+		organizationID,
 		programID,
 		user.Email,
+		orgUser.OrgRole,
 		programUser.Role,
 		user.IsAdmin,
 	)
@@ -246,7 +323,7 @@ func (s *AuthService) SwitchProgram(ctx context.Context, userID, programID uuid.
 		return nil, fmt.Errorf("failed to generate access token: %w", err)
 	}
 
-	// 4. Update last program accessed
+	// 6. Update last program accessed
 	_ = s.repo.UpdateLastProgramAccessed(ctx, userID, programID)
 
 	// Note: Refresh token remains the same - no need to regenerate
@@ -276,7 +353,13 @@ func (s *AuthService) Logout(ctx context.Context, refreshTokenString string) err
 
 // GetUserPrograms returns all programs a user has access to
 func (s *AuthService) GetUserPrograms(ctx context.Context, userID uuid.UUID) ([]ProgramAccess, error) {
-	return s.repo.GetUserPrograms(ctx, userID)
+	// Get user's organization first
+	org, err := s.repo.GetUserOrganization(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("user not linked to organization: %w", err)
+	}
+
+	return s.repo.GetUserPrograms(ctx, userID, org.OrganizationID)
 }
 
 // ValidateAccessToken validates an access token and returns claims
