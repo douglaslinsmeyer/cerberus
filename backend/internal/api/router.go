@@ -9,12 +9,13 @@ import (
 	"github.com/cerberus/backend/internal/modules/risk"
 	"github.com/cerberus/backend/internal/platform/auth"
 	"github.com/cerberus/backend/internal/platform/db"
+	"github.com/cerberus/backend/internal/platform/events"
 	"github.com/cerberus/backend/internal/platform/storage"
 	"github.com/go-chi/chi/v5"
 )
 
 // NewRouter creates a new API router
-func NewRouter(database *db.DB) chi.Router {
+func NewRouter(database *db.DB, eventBus *events.NATSBus) chi.Router {
 	r := chi.NewRouter()
 
 	// Initialize storage client
@@ -73,7 +74,7 @@ func NewRouter(database *db.DB) chi.Router {
 		r.Use(auth.AuthMiddleware(tokenService, authRepo))
 
 		// Register module routes (pass authRepo for program access checks)
-		artifacts.RegisterRoutes(r, artifactsService, authRepo)
+		artifacts.RegisterRoutes(r, artifactsService, authRepo, eventBus)
 		financial.RegisterRoutes(r, financialService, authRepo)
 		risk.RegisterRoutes(r, riskService, conversationService, authRepo)
 		programs.RegisterRoutes(r, programsService, authRepo)

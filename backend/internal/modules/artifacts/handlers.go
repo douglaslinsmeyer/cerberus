@@ -1,6 +1,7 @@
 package artifacts
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -8,12 +9,18 @@ import (
 	"strings"
 
 	"github.com/cerberus/backend/internal/platform/auth"
+	"github.com/cerberus/backend/internal/platform/events"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
 
+// EventPublisher defines the interface for publishing events
+type EventPublisher interface {
+	Publish(ctx context.Context, event *events.Event) error
+}
+
 // RegisterRoutes registers all artifact endpoints
-func RegisterRoutes(r chi.Router, service *Service, authRepo *auth.Repository) {
+func RegisterRoutes(r chi.Router, service *Service, authRepo *auth.Repository, eventBus EventPublisher) {
 	r.Route("/programs/{programId}/artifacts", func(r chi.Router) {
 		// Viewer access (read operations)
 		r.Group(func(r chi.Router) {
@@ -27,16 +34,16 @@ func RegisterRoutes(r chi.Router, service *Service, authRepo *auth.Repository) {
 		// Contributor access (write operations)
 		r.Group(func(r chi.Router) {
 			r.Use(auth.RequireProgramAccess(auth.RoleContributor, authRepo))
-			r.Post("/upload", handleUpload(service))
+			r.Post("/upload", handleUpload(service, eventBus))
 			r.Post("/search", handleSearch(service))
-			r.Post("/{artifactId}/reanalyze", handleReanalyze(service))
+			r.Post("/{artifactId}/reanalyze", handleReanalyze(service, eventBus))
 			r.Delete("/{artifactId}", handleDelete(service))
 		})
 	})
 }
 
 // handleUpload handles artifact upload
-func handleUpload(service *Service) http.HandlerFunc {
+func handleUpload(service *Service, eventBus EventPublisher) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Parse program ID from URL
 		programIDStr := chi.URLParam(r, "programId")
@@ -72,11 +79,63 @@ func handleUpload(service *Service) http.HandlerFunc {
 		// Parse force parameter from query string
 		forceUpload := r.URL.Query().Get("force") == "true"
 
-		// Upload artifact
+		// Detect if this is a ZIP file
+		mimeType := header.Header.Get("Content-Type")
+		isZipFile := strings.HasPrefix(mimeType, "application/zip") ||
+			strings.HasPrefix(mimeType, "application/x-zip") ||
+			strings.HasSuffix(strings.ToLower(header.Filename), ".zip")
+
+		if isZipFile {
+			// Handle ZIP file - expand and upload each file separately
+			artifactIDs, err := service.UploadZipArchive(r.Context(), UploadRequest{
+				ProgramID:   programID,
+				Filename:    header.Filename,
+				MimeType:    mimeType,
+				Data:        data,
+				UploadedBy:  uploadedBy,
+				ForceUpload: forceUpload,
+			})
+
+			if err != nil {
+				respondError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+
+			// Publish events for each uploaded artifact
+			for _, artifactID := range artifactIDs {
+				event := events.NewEvent(
+					events.ArtifactUploaded,
+					programID,
+					"artifacts",
+					map[string]interface{}{
+						"artifact_id": artifactID.String(),
+					},
+				)
+				if err := eventBus.Publish(r.Context(), event); err != nil {
+					// Log error but don't fail the upload
+					fmt.Printf("Warning: Failed to publish event for artifact %s: %v\n", artifactID, err)
+				}
+			}
+
+			// Return success with list of artifact IDs
+			artifactIDStrings := make([]string, len(artifactIDs))
+			for i, id := range artifactIDs {
+				artifactIDStrings[i] = id.String()
+			}
+
+			respondCreated(w, map[string]interface{}{
+				"artifact_ids": artifactIDStrings,
+				"count":        len(artifactIDs),
+				"message":      fmt.Sprintf("ZIP archive expanded. %d files uploaded successfully. AI analysis queued.", len(artifactIDs)),
+			})
+			return
+		}
+
+		// Upload single artifact
 		artifactID, err := service.UploadArtifact(r.Context(), UploadRequest{
 			ProgramID:   programID,
 			Filename:    header.Filename,
-			MimeType:    header.Header.Get("Content-Type"),
+			MimeType:    mimeType,
 			Data:        data,
 			UploadedBy:  uploadedBy,
 			ForceUpload: forceUpload,
@@ -104,6 +163,20 @@ func handleUpload(service *Service) http.HandlerFunc {
 			}
 			respondError(w, http.StatusInternalServerError, err.Error())
 			return
+		}
+
+		// Publish event for successful upload
+		event := events.NewEvent(
+			events.ArtifactUploaded,
+			programID,
+			"artifacts",
+			map[string]interface{}{
+				"artifact_id": artifactID.String(),
+			},
+		)
+		if err := eventBus.Publish(r.Context(), event); err != nil {
+			// Log error but don't fail the upload
+			fmt.Printf("Warning: Failed to publish artifact upload event: %v\n", err)
 		}
 
 		respondCreated(w, map[string]string{
@@ -253,7 +326,7 @@ func handleDelete(service *Service) http.HandlerFunc {
 }
 
 // handleReanalyze queues an artifact for reanalysis
-func handleReanalyze(service *Service) http.HandlerFunc {
+func handleReanalyze(service *Service, eventBus EventPublisher) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		artifactIDStr := chi.URLParam(r, "artifactId")
 		artifactID, err := uuid.Parse(artifactIDStr)
@@ -262,9 +335,31 @@ func handleReanalyze(service *Service) http.HandlerFunc {
 			return
 		}
 
+		// Get artifact to retrieve program ID
+		artifact, err := service.GetArtifact(r.Context(), artifactID)
+		if err != nil {
+			respondError(w, http.StatusNotFound, "Artifact not found")
+			return
+		}
+
 		if err := service.QueueForReanalysis(r.Context(), artifactID); err != nil {
 			respondError(w, http.StatusInternalServerError, err.Error())
 			return
+		}
+
+		// Publish event to trigger reanalysis
+		event := events.NewEvent(
+			events.ArtifactUploaded,
+			artifact.ProgramID,
+			"artifacts",
+			map[string]interface{}{
+				"artifact_id": artifactID.String(),
+				"reanalysis":  true,
+			},
+		)
+		if err := eventBus.Publish(r.Context(), event); err != nil {
+			// Log error but don't fail the operation
+			fmt.Printf("Warning: Failed to publish reanalysis event: %v\n", err)
 		}
 
 		respondSuccess(w, map[string]string{

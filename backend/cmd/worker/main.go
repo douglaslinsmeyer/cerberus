@@ -114,9 +114,20 @@ func main() {
 
 	log.Println("NATS connection established")
 
-	// Subscribe to artifact.uploaded events
+	// Create a semaphore to limit concurrent processing (configurable)
+	maxConcurrency := 5
+	if concurrencyStr := getEnv("ARTIFACT_CONCURRENCY", ""); concurrencyStr != "" {
+		if _, err := fmt.Sscanf(concurrencyStr, "%d", &maxConcurrency); err != nil {
+			log.Printf("Invalid ARTIFACT_CONCURRENCY value, using default: 5")
+			maxConcurrency = 5
+		}
+	}
+	sem := make(chan struct{}, maxConcurrency)
+	log.Printf("Worker configured with max concurrency: %d", maxConcurrency)
+
+	// Subscribe to artifact.uploaded events with parallel processing
 	eventBus.Subscribe(events.ArtifactUploaded, func(ctx context.Context, event *events.Event) error {
-		log.Printf("Processing artifact upload event: %s", event.ID)
+		log.Printf("Received artifact upload event: %s", event.ID)
 
 		// Extract artifact ID from payload
 		artifactIDStr, ok := event.Payload["artifact_id"].(string)
@@ -129,69 +140,80 @@ func main() {
 			return fmt.Errorf("failed to parse artifact ID: %w", err)
 		}
 
-		// Get artifact
-		artifact, err := artifactsRepo.GetByID(ctx, artifactID)
-		if err != nil {
-			return fmt.Errorf("failed to get artifact: %w", err)
-		}
+		// Process artifact in a goroutine with semaphore for concurrency control
+		go func() {
+			// Acquire semaphore
+			sem <- struct{}{}
+			defer func() { <-sem }() // Release semaphore
 
-		// Create program context (simplified for now)
-		// Build program context from database
-		programContext := contextBuilder.BuildContextOrDefault(ctx, artifact.ProgramID)
+			log.Printf("Processing artifact upload event: %s (artifact: %s)", event.ID, artifactID)
 
-		// Process artifact with AI analysis
-		if err := aiAnalyzer.ProcessArtifact(ctx, artifact, programContext); err != nil {
-			log.Printf("Failed to process artifact %s: %v", artifactID, err)
-			return err
-		}
-
-		log.Printf("Successfully analyzed artifact: %s (%s)", artifact.Filename, artifactID)
-
-		// Detect risks from insights (best effort - don't fail artifact processing)
-		insights, err := fetchArtifactInsights(ctx, database, artifactID, artifact.ProgramID)
-		if err != nil {
-			log.Printf("Warning: Failed to fetch insights for risk detection: %v", err)
-		} else if len(insights) > 0 {
-			log.Printf("Analyzing %d insights for risk detection...", len(insights))
-			if err := riskDetector.AnalyzeForRisks(ctx, insights); err != nil {
-				log.Printf("Warning: Risk detection failed: %v", err)
-			} else {
-				log.Printf("Risk detection completed for artifact: %s", artifactID)
+			// Get artifact
+			artifact, err := artifactsRepo.GetByID(ctx, artifactID)
+			if err != nil {
+				log.Printf("Failed to get artifact %s: %v", artifactID, err)
+				return
 			}
 
-			// Enrich existing risks with new insights
-			log.Printf("Checking for risk enrichment opportunities from %d insights...", len(insights))
-			if err := riskDetector.EnrichExistingRisks(ctx, insights); err != nil {
-				log.Printf("Warning: Risk enrichment failed: %v", err)
-			} else {
-				log.Printf("Risk enrichment check completed for artifact: %s", artifactID)
+			// Create program context (simplified for now)
+			// Build program context from database
+			programContext := contextBuilder.BuildContextOrDefault(ctx, artifact.ProgramID)
+
+			// Process artifact with AI analysis
+			if err := aiAnalyzer.ProcessArtifact(ctx, artifact, programContext); err != nil {
+				log.Printf("Failed to process artifact %s: %v", artifactID, err)
+				return
 			}
-		}
 
-		// Generate embeddings if configured
-		if openaiKey != "" {
-			if err := embeddingsService.GenerateEmbeddings(ctx, artifactID); err != nil {
-				log.Printf("Failed to generate embeddings for %s: %v", artifactID, err)
-				// Don't fail the whole process if embeddings fail
-			} else {
-				log.Printf("Generated embeddings for artifact: %s", artifactID)
+			log.Printf("Successfully analyzed artifact: %s (%s)", artifact.Filename, artifactID)
+
+			// Detect risks from insights (best effort - don't fail artifact processing)
+			insights, err := fetchArtifactInsights(ctx, database, artifactID, artifact.ProgramID)
+			if err != nil {
+				log.Printf("Warning: Failed to fetch insights for risk detection: %v", err)
+			} else if len(insights) > 0 {
+				log.Printf("Analyzing %d insights for risk detection...", len(insights))
+				if err := riskDetector.AnalyzeForRisks(ctx, insights); err != nil {
+					log.Printf("Warning: Risk detection failed: %v", err)
+				} else {
+					log.Printf("Risk detection completed for artifact: %s", artifactID)
+				}
+
+				// Enrich existing risks with new insights
+				log.Printf("Checking for risk enrichment opportunities from %d insights...", len(insights))
+				if err := riskDetector.EnrichExistingRisks(ctx, insights); err != nil {
+					log.Printf("Warning: Risk enrichment failed: %v", err)
+				} else {
+					log.Printf("Risk enrichment check completed for artifact: %s", artifactID)
+				}
 			}
-		}
 
-		// Publish artifact.analyzed event
-		analyzedEvent := events.NewEvent(
-			events.ArtifactAnalyzed,
-			event.ProgramID,
-			"artifacts",
-			map[string]interface{}{
-				"artifact_id": artifactID.String(),
-			},
-		).WithCorrelationID(event.CorrelationID)
+			// Generate embeddings if configured
+			if openaiKey != "" {
+				if err := embeddingsService.GenerateEmbeddings(ctx, artifactID); err != nil {
+					log.Printf("Failed to generate embeddings for %s: %v", artifactID, err)
+					// Don't fail the whole process if embeddings fail
+				} else {
+					log.Printf("Generated embeddings for artifact: %s", artifactID)
+				}
+			}
 
-		if err := eventBus.Publish(ctx, analyzedEvent); err != nil {
-			log.Printf("Failed to publish artifact.analyzed event: %v", err)
-		}
+			// Publish artifact.analyzed event
+			analyzedEvent := events.NewEvent(
+				events.ArtifactAnalyzed,
+				event.ProgramID,
+				"artifacts",
+				map[string]interface{}{
+					"artifact_id": artifactID.String(),
+				},
+			).WithCorrelationID(event.CorrelationID)
 
+			if err := eventBus.Publish(ctx, analyzedEvent); err != nil {
+				log.Printf("Failed to publish artifact.analyzed event: %v", err)
+			}
+		}()
+
+		// Return immediately - processing happens in background
 		return nil
 	})
 
@@ -206,7 +228,7 @@ func main() {
 		}
 	}()
 
-	// Also poll database for pending artifacts (backup mechanism)
+	// Also poll database for pending artifacts (backup mechanism) with parallel processing
 	go func() {
 		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
@@ -217,81 +239,85 @@ func main() {
 				return
 			case <-ticker.C:
 				// Get pending artifacts
-				pending, err := artifactsRepo.GetPendingArtifacts(ctx, 10)
+				pending, err := artifactsRepo.GetPendingArtifacts(ctx, 50)
 				if err != nil {
 					log.Printf("Failed to get pending artifacts: %v", err)
 					continue
 				}
 
+				if len(pending) > 0 {
+					log.Printf("Found %d pending artifacts in database polling", len(pending))
+				}
+
+				// Process artifacts in parallel using semaphore
 				for _, artifact := range pending {
-					log.Printf("Processing pending artifact from database: %s", artifact.ArtifactID)
+					artifact := artifact // Capture loop variable
+					go func() {
+						// Acquire semaphore
+						sem <- struct{}{}
+						defer func() { <-sem }() // Release semaphore
 
-					programContext := &ai.ProgramContext{
-						ProgramName: "Default Program",
-						ProgramCode: "DEFAULT",
-					}
+						log.Printf("Processing pending artifact from database: %s", artifact.ArtifactID)
 
-					if err := aiAnalyzer.ProcessArtifact(ctx, &artifact, programContext); err != nil {
-						log.Printf("Failed to process artifact %s: %v", artifact.ArtifactID, err)
-						continue
-					}
+						programContext := contextBuilder.BuildContextOrDefault(ctx, artifact.ProgramID)
 
-					// Generate embeddings
-					if openaiKey != "" {
-						if err := embeddingsService.GenerateEmbeddings(ctx, artifact.ArtifactID); err != nil {
-							log.Printf("Failed to generate embeddings: %v", err)
-						}
-					}
-
-					// Detect risks from insights (best effort)
-					insights, err := fetchArtifactInsights(ctx, database, artifact.ArtifactID, artifact.ProgramID)
-					if err != nil {
-						log.Printf("Warning: Failed to fetch insights for risk detection: %v", err)
-					} else if len(insights) > 0 {
-						log.Printf("Analyzing %d insights for risk detection...", len(insights))
-						if err := riskDetector.AnalyzeForRisks(ctx, insights); err != nil {
-							log.Printf("Warning: Risk detection failed: %v", err)
-						} else {
-							log.Printf("Risk detection completed for artifact: %s", artifact.ArtifactID)
+						if err := aiAnalyzer.ProcessArtifact(ctx, &artifact, programContext); err != nil {
+							log.Printf("Failed to process artifact %s: %v", artifact.ArtifactID, err)
+							return
 						}
 
-						// Enrich existing risks with new insights
-						log.Printf("Checking for risk enrichment opportunities from %d insights...", len(insights))
-						if err := riskDetector.EnrichExistingRisks(ctx, insights); err != nil {
-							log.Printf("Warning: Risk enrichment failed: %v", err)
-						} else {
-							log.Printf("Risk enrichment check completed for artifact: %s", artifact.ArtifactID)
-						}
-					}
-
-					// Check if artifact is an invoice and process financially
-					updatedArtifact, err := artifactsRepo.GetByID(ctx, artifact.ArtifactID)
-					if err == nil && updatedArtifact.ArtifactCategory.Valid {
-						category := updatedArtifact.ArtifactCategory.String
-						log.Printf("Artifact %s categorized as: %s", artifact.ArtifactID, category)
-
-						if category == "invoice" && updatedArtifact.RawContent.Valid {
-							log.Printf("Processing invoice artifact: %s (filename: %s)", artifact.ArtifactID, updatedArtifact.Filename)
-
-							programContext := &ai.ProgramContext{
-								ProgramName: "Default Program",
-								ProgramCode: "DEFAULT",
+						// Generate embeddings
+						if openaiKey != "" {
+							if err := embeddingsService.GenerateEmbeddings(ctx, artifact.ArtifactID); err != nil {
+								log.Printf("Failed to generate embeddings: %v", err)
 							}
+						}
 
-							err := invoiceAnalyzer.ProcessInvoice(
-								ctx,
-								updatedArtifact.ArtifactID,
-								updatedArtifact.RawContent.String,
-								updatedArtifact.ProgramID,
-								programContext,
-							)
-							if err != nil {
-								log.Printf("ERROR: Failed to process invoice: %v", err)
+						// Detect risks from insights (best effort)
+						insights, err := fetchArtifactInsights(ctx, database, artifact.ArtifactID, artifact.ProgramID)
+						if err != nil {
+							log.Printf("Warning: Failed to fetch insights for risk detection: %v", err)
+						} else if len(insights) > 0 {
+							log.Printf("Analyzing %d insights for risk detection...", len(insights))
+							if err := riskDetector.AnalyzeForRisks(ctx, insights); err != nil {
+								log.Printf("Warning: Risk detection failed: %v", err)
 							} else {
-								log.Printf("SUCCESS: Invoice processed for artifact: %s", artifact.ArtifactID)
+								log.Printf("Risk detection completed for artifact: %s", artifact.ArtifactID)
+							}
+
+							// Enrich existing risks with new insights
+							log.Printf("Checking for risk enrichment opportunities from %d insights...", len(insights))
+							if err := riskDetector.EnrichExistingRisks(ctx, insights); err != nil {
+								log.Printf("Warning: Risk enrichment failed: %v", err)
+							} else {
+								log.Printf("Risk enrichment check completed for artifact: %s", artifact.ArtifactID)
 							}
 						}
-					}
+
+						// Check if artifact is an invoice and process financially
+						updatedArtifact, err := artifactsRepo.GetByID(ctx, artifact.ArtifactID)
+						if err == nil && updatedArtifact.ArtifactCategory.Valid {
+							category := updatedArtifact.ArtifactCategory.String
+							log.Printf("Artifact %s categorized as: %s", artifact.ArtifactID, category)
+
+							if category == "invoice" && updatedArtifact.RawContent.Valid {
+								log.Printf("Processing invoice artifact: %s (filename: %s)", artifact.ArtifactID, updatedArtifact.Filename)
+
+								err := invoiceAnalyzer.ProcessInvoice(
+									ctx,
+									updatedArtifact.ArtifactID,
+									updatedArtifact.RawContent.String,
+									updatedArtifact.ProgramID,
+									programContext,
+								)
+								if err != nil {
+									log.Printf("ERROR: Failed to process invoice: %v", err)
+								} else {
+									log.Printf("SUCCESS: Invoice processed for artifact: %s", artifact.ArtifactID)
+								}
+							}
+						}
+					}()
 				}
 			}
 		}

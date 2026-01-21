@@ -3,11 +3,14 @@
 package artifacts
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"path/filepath"
 	"strings"
 	"time"
@@ -118,6 +121,86 @@ func NewServiceWithMocks(repo RepositoryInterface, db DBExecutor, stor storage.S
 		extractors: extractors.NewExtractorFactory(),
 		chunker:    DefaultChunkingStrategy(),
 	}
+}
+
+// UploadZipArchive expands a ZIP file and uploads each file as a separate artifact
+func (s *Service) UploadZipArchive(ctx context.Context, req UploadRequest) ([]uuid.UUID, error) {
+	// Import archive/zip and bytes packages at the top of the file
+	var artifactIDs []uuid.UUID
+	var errors []string
+
+	// Parse the ZIP archive
+	zipReader, err := zip.NewReader(bytes.NewReader(req.Data), int64(len(req.Data)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read ZIP archive: %w", err)
+	}
+
+	// Extract and upload each file
+	for _, file := range zipReader.File {
+		// Skip directories
+		if file.FileInfo().IsDir() {
+			continue
+		}
+
+		// Open the file within the ZIP
+		rc, err := file.Open()
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("%s: failed to open", file.Name))
+			continue
+		}
+
+		// Read file data
+		fileData, err := io.ReadAll(rc)
+		rc.Close()
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("%s: failed to read", file.Name))
+			continue
+		}
+
+		// Skip empty files
+		if len(fileData) == 0 {
+			continue
+		}
+
+		// Determine MIME type from file extension
+		mimeType := getMimeTypeFromExtension(file.Name)
+
+		// Check if we can process this file type
+		if !s.extractors.CanExtract(mimeType) {
+			// Skip unsupported file types silently
+			continue
+		}
+
+		// Create upload request for this file
+		fileReq := UploadRequest{
+			ProgramID:   req.ProgramID,
+			Filename:    filepath.Base(file.Name), // Use just the filename, not the full path
+			MimeType:    mimeType,
+			Data:        fileData,
+			UploadedBy:  req.UploadedBy,
+			ForceUpload: req.ForceUpload,
+		}
+
+		// Upload the file as a separate artifact
+		artifactID, err := s.UploadArtifact(ctx, fileReq)
+		if err != nil {
+			// Log error but continue with other files
+			errors = append(errors, fmt.Sprintf("%s: %v", file.Name, err))
+			continue
+		}
+
+		artifactIDs = append(artifactIDs, artifactID)
+	}
+
+	// If no files were successfully uploaded, return an error
+	if len(artifactIDs) == 0 {
+		if len(errors) > 0 {
+			return nil, fmt.Errorf("no files could be extracted from ZIP: %s", strings.Join(errors, "; "))
+		}
+		return nil, fmt.Errorf("no supported files found in ZIP archive")
+	}
+
+	return artifactIDs, nil
 }
 
 // UploadArtifact processes and stores a new artifact
@@ -580,6 +663,10 @@ func (s *Service) inferFileType(mimeType, filename string) string {
 		return "html"
 	case "application/xml", "text/xml":
 		return "xml"
+	case "application/zip", "application/x-zip-compressed", "application/x-zip":
+		return "zip"
+	case "message/rfc822", "application/vnd.ms-outlook", "message/x-emlx":
+		return "eml"
 	}
 
 	// Fall back to file extension
@@ -605,4 +692,34 @@ func stringContains(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// getMimeTypeFromExtension determines MIME type from filename extension
+func getMimeTypeFromExtension(filename string) string {
+	ext := strings.ToLower(filepath.Ext(filename))
+
+	mimeTypes := map[string]string{
+		".pdf":  "application/pdf",
+		".txt":  "text/plain",
+		".md":   "text/markdown",
+		".csv":  "text/csv",
+		".json": "application/json",
+		".xml":  "application/xml",
+		".html": "text/html",
+		".htm":  "text/html",
+		".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+		".xls":  "application/vnd.ms-excel",
+		".doc":  "application/msword",
+		".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+		".eml":  "message/rfc822",
+		".msg":  "application/vnd.ms-outlook",
+		".zip":  "application/zip",
+	}
+
+	if mimeType, ok := mimeTypes[ext]; ok {
+		return mimeType
+	}
+
+	// Default to octet-stream for unknown types
+	return "application/octet-stream"
 }

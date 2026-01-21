@@ -12,14 +12,22 @@ type ExtractorFactory struct {
 
 // NewExtractorFactory creates a new extractor factory with all available extractors
 func NewExtractorFactory() *ExtractorFactory {
-	return &ExtractorFactory{
+	factory := &ExtractorFactory{
 		extractors: []ContentExtractor{
 			NewPDFExtractor(),
 			NewTextExtractor(),
 			NewExcelExtractor(),
+			NewEMLExtractor(),
 			// Future: Add DOCX, Image extractors
 		},
 	}
+
+	// Add ZIP extractor with factory reference for nested extraction
+	zipExtractor := NewZipExtractor()
+	zipExtractor.SetFactory(factory)
+	factory.extractors = append(factory.extractors, zipExtractor)
+
+	return factory
 }
 
 // GetExtractor returns the appropriate extractor for the given MIME type

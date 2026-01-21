@@ -12,6 +12,7 @@ import (
 
 	"github.com/cerberus/backend/internal/api"
 	"github.com/cerberus/backend/internal/platform/db"
+	"github.com/cerberus/backend/internal/platform/events"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
@@ -29,6 +30,7 @@ func main() {
 	dbName := getEnv("DB_NAME", "cerberus")
 	dbUser := getEnv("DB_USER", "cerberus")
 	dbPassword := getEnv("DB_PASSWORD", "cerberus_dev")
+	natsURL := getEnv("NATS_URL", "nats://localhost:4222")
 
 	// Connect to database
 	dbURL := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable",
@@ -47,6 +49,15 @@ func main() {
 	if err := database.RunMigrations(migrationsDir); err != nil {
 		log.Fatalf("Failed to run migrations: %v", err)
 	}
+
+	// Connect to NATS event bus
+	eventBus, err := events.NewNATSBus(natsURL)
+	if err != nil {
+		log.Fatalf("Failed to connect to NATS: %v", err)
+	}
+	defer eventBus.Close()
+
+	log.Println("NATS connection established")
 
 	// Create router
 	r := chi.NewRouter()
@@ -76,7 +87,7 @@ func main() {
 	})
 
 	// API routes
-	r.Mount("/api/v1", api.NewRouter(database))
+	r.Mount("/api/v1", api.NewRouter(database, eventBus))
 
 	// Start server
 	srv := &http.Server{
