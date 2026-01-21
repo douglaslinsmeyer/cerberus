@@ -40,8 +40,11 @@ export interface LoginResponse {
 }
 
 export interface RefreshResponse {
+  user: UserInfo
+  organization: OrganizationInfo
+  current_program: ProgramAccess | null
+  programs: ProgramAccess[]
   access_token: string
-  refresh_token: string
   expires_in: number
 }
 

@@ -156,6 +156,17 @@ type RefreshTokenRequest struct {
 	RefreshToken string `json:"refresh_token"`
 }
 
+// RefreshResponse represents a refresh token response with full session data
+type RefreshResponse struct {
+	User           UserInfo        `json:"user"`
+	Organization   OrganizationInfo `json:"organization"`
+	CurrentProgram *ProgramAccess  `json:"current_program"`
+	Programs       []ProgramAccess `json:"programs"`
+	AccessToken    string          `json:"access_token"`
+	RefreshToken   string          `json:"-"` // Not sent in JSON, used for cookie
+	ExpiresIn      int64           `json:"expires_in"` // seconds
+}
+
 // SwitchProgramRequest represents a program switch request
 type SwitchProgramRequest struct {
 	ProgramID uuid.UUID `json:"program_id"`

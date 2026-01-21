@@ -173,8 +173,8 @@ func (s *AuthService) Login(ctx context.Context, req LoginRequest) (*LoginRespon
 	}, nil
 }
 
-// RefreshToken generates new tokens using a refresh token
-func (s *AuthService) RefreshToken(ctx context.Context, refreshTokenString string) (*TokenPair, error) {
+// RefreshToken generates new tokens using a refresh token and returns full session data
+func (s *AuthService) RefreshToken(ctx context.Context, refreshTokenString string) (*RefreshResponse, error) {
 	// 1. Validate refresh token structure
 	claims, err := s.tokenService.ValidateRefreshToken(refreshTokenString)
 	if err != nil {
@@ -205,38 +205,54 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshTokenString strin
 		return nil, fmt.Errorf("account is inactive")
 	}
 
-	// 4. Get organization membership
+	// 4. Get organization and organization membership
+	org, err := s.repo.GetOrganizationByID(ctx, storedToken.OrganizationID)
+	if err != nil {
+		return nil, fmt.Errorf("organization not found")
+	}
+
 	orgUser, err := s.repo.GetOrganizationUser(ctx, storedToken.OrganizationID, user.UserID)
 	if err != nil || orgUser.RevokedAt != nil {
 		return nil, fmt.Errorf("organization access revoked")
 	}
 
-	// 5. Get user's program access for the stored program
-	programUser, err := s.repo.GetProgramUser(ctx, storedToken.ProgramID, user.UserID)
-	if err != nil {
-		// If program access lost, get their first available program in org
-		programs, err := s.repo.GetUserPrograms(ctx, user.UserID, storedToken.OrganizationID)
-		if err != nil || len(programs) == 0 {
-			return nil, fmt.Errorf("no program access available")
-		}
-		storedToken.ProgramID = programs[0].ProgramID
-		programUser = &ProgramUser{
-			ProgramID: programs[0].ProgramID,
-			Role:      programs[0].Role,
-		}
+	// 5. Get all user's programs in this organization
+	programs, err := s.repo.GetUserPrograms(ctx, user.UserID, storedToken.OrganizationID)
+	if err != nil || len(programs) == 0 {
+		return nil, fmt.Errorf("no program access available")
 	}
 
-	// 6. Revoke old refresh token (rotation)
+	// 6. Find the current program (or use first if not found)
+	var currentProgram *ProgramAccess
+	for i := range programs {
+		if programs[i].ProgramID == storedToken.ProgramID {
+			currentProgram = &programs[i]
+			break
+		}
+	}
+	if currentProgram == nil {
+		// Program access was revoked, use first available
+		currentProgram = &programs[0]
+		storedToken.ProgramID = programs[0].ProgramID
+	}
+
+	// 7. Get program user for role
+	programUser, err := s.repo.GetProgramUser(ctx, currentProgram.ProgramID, user.UserID)
+	if err != nil {
+		return nil, fmt.Errorf("program access not found")
+	}
+
+	// 8. Revoke old refresh token (rotation)
 	err = s.repo.RevokeRefreshToken(ctx, claims.TokenID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to revoke old refresh token: %w", err)
 	}
 
-	// 7. Generate new tokens
+	// 9. Generate new tokens
 	accessToken, err := s.tokenService.GenerateAccessToken(
 		user.UserID,
 		storedToken.OrganizationID,
-		storedToken.ProgramID,
+		currentProgram.ProgramID,
 		user.Email,
 		orgUser.OrgRole,
 		programUser.Role,
@@ -251,12 +267,12 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshTokenString strin
 		return nil, fmt.Errorf("failed to generate refresh token: %w", err)
 	}
 
-	// 8. Store new refresh token
+	// 10. Store new refresh token
 	err = s.repo.StoreRefreshToken(ctx, RefreshToken{
 		TokenID:        newTokenID,
 		UserID:         user.UserID,
 		OrganizationID: storedToken.OrganizationID,
-		ProgramID:      storedToken.ProgramID,
+		ProgramID:      currentProgram.ProgramID,
 		IssuedAt:       time.Now(),
 		ExpiresAt:      time.Now().Add(s.tokenService.GetRefreshTokenExpiry()),
 	})
@@ -264,11 +280,30 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshTokenString strin
 		return nil, fmt.Errorf("failed to store new refresh token: %w", err)
 	}
 
-	return &TokenPair{
-		AccessToken:  accessToken,
-		RefreshToken: newRefreshToken,
-		ExpiresIn:    int64(s.tokenService.GetAccessTokenExpiry().Seconds()),
-	}, nil
+	// 11. Return full session data (newRefreshToken will be set as cookie by handler)
+	resp := &RefreshResponse{
+		User: UserInfo{
+			UserID:   user.UserID,
+			Email:    user.Email,
+			FullName: user.FullName,
+			IsAdmin:  user.IsAdmin,
+		},
+		Organization: OrganizationInfo{
+			OrganizationID:   org.OrganizationID,
+			OrganizationName: org.OrganizationName,
+			OrganizationCode: org.OrganizationCode,
+			OrgRole:          orgUser.OrgRole,
+		},
+		CurrentProgram: currentProgram,
+		Programs:       programs,
+		AccessToken:    accessToken,
+		ExpiresIn:      int64(s.tokenService.GetAccessTokenExpiry().Seconds()),
+	}
+
+	// Store the new refresh token string in the response (handler will extract it for cookie)
+	resp.RefreshToken = newRefreshToken
+
+	return resp, nil
 }
 
 // SwitchProgram generates a new access token for a different program

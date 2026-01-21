@@ -72,8 +72,8 @@ func handleRefreshToken(db *db.DB, authService *auth.AuthService) http.HandlerFu
 			return
 		}
 
-		// Refresh tokens
-		newTokens, err := authService.RefreshToken(r.Context(), cookie.Value)
+		// Refresh tokens and get full session data
+		sessionData, err := authService.RefreshToken(r.Context(), cookie.Value)
 		if err != nil {
 			// Clear invalid cookie
 			http.SetCookie(w, &http.Cookie{
@@ -90,7 +90,7 @@ func handleRefreshToken(db *db.DB, authService *auth.AuthService) http.HandlerFu
 		// Set new httpOnly cookie for new refresh token
 		http.SetCookie(w, &http.Cookie{
 			Name:     "refresh_token",
-			Value:    newTokens.RefreshToken,
+			Value:    sessionData.RefreshToken,
 			Path:     "/",
 			HttpOnly: true,
 			Secure:   isProduction(),
@@ -98,10 +98,10 @@ func handleRefreshToken(db *db.DB, authService *auth.AuthService) http.HandlerFu
 			MaxAge:   7 * 24 * 60 * 60,
 		})
 
-		// Return new access token
+		// Return full session data (refresh token excluded from JSON)
 		respondJSON(w, http.StatusOK, SuccessResponse{
 			Success: true,
-			Data:    newTokens,
+			Data:    sessionData,
 		})
 	}
 }

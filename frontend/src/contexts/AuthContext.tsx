@@ -64,16 +64,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const refreshAccessToken = useCallback(async () => {
     try {
       const data = await authService.refresh()
+      console.log('Refresh response:', data)
 
-      setState(prev => ({
-        ...prev,
+      setState({
+        user: data.user,
+        organization: data.organization,
+        currentProgram: data.current_program,
+        availablePrograms: data.programs,
         accessToken: data.access_token,
         tokenExpiresAt: Date.now() + (data.expires_in * 1000),
         isAuthenticated: true,
         isLoading: false,
-      }))
+      })
     } catch (error) {
       // Refresh failed - logout
+      console.error('Refresh failed:', error)
       setState({
         user: null,
         organization: null,
@@ -200,12 +205,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     })
   }, [state.accessToken, refreshAccessToken, logout])
 
-  // Initial auth check on mount
+  // Initial auth check on mount - only restore if no valid session exists
   useEffect(() => {
-    // Set loading to false immediately - don't try to auto-refresh on mount
-    // This prevents hanging on initial load
-    setState(prev => ({ ...prev, isLoading: false }))
-  }, [])
+    const restoreSession = async () => {
+      // Check if we already have a valid token
+      if (state.accessToken && state.tokenExpiresAt && Date.now() < state.tokenExpiresAt) {
+        // Already have valid token, don't need to refresh
+        setState(prev => ({ ...prev, isLoading: false }))
+        return
+      }
+
+      // No valid token, try to refresh from cookie
+      try {
+        await refreshAccessToken()
+      } catch (error) {
+        // No valid refresh token - user needs to login
+        setState(prev => ({ ...prev, isLoading: false }))
+      }
+    }
+
+    restoreSession()
+  }, []) // Empty deps - only run once on mount
 
   const value: AuthContextValue = {
     ...state,
